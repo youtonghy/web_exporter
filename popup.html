@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>网页元素导出 PDF</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>网页元素导出 PDF</h1>
+
+      <label class="toggle">
+        <input id="preserveStyles" type="checkbox" checked />
+        <span>保留格式（样式）</span>
+      </label>
+
+      <button id="selectAndExport" type="button">选择元素并导出</button>
+
+      <p class="hint">点击按钮后，在页面上点选元素。按 Esc 取消。</p>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

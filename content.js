@@ -1,0 +1,505 @@
+(() => {
+  const HIGHLIGHT_CLASS = "__web_exporter_highlight__";
+  const OVERLAY_ID = "__web_exporter_overlay__";
+  const STYLE_ID = "__web_exporter_style__";
+  const PRINT_CONTAINER_ID = "__web_exporter_print_container__";
+  const PRINT_STYLE_ID = "__web_exporter_print_style__";
+
+  let selecting = false;
+  let preserveStyles = true;
+  let lastHighlighted = null;
+  let overlay = null;
+
+  const api = typeof browser !== "undefined" ? browser : chrome;
+
+  function ensureStyleTag() {
+    if (document.getElementById(STYLE_ID)) {
+      return;
+    }
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      .${HIGHLIGHT_CLASS} {
+        outline: 2px solid #ff6a00 !important;
+        outline-offset: 2px !important;
+        cursor: crosshair !important;
+      }
+      #${OVERLAY_ID} {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        padding: 8px 12px;
+        background: rgba(26, 31, 54, 0.92);
+        color: #ffffff;
+        font-size: 12px;
+        border-radius: 8px;
+        z-index: 2147483647;
+        pointer-events: none;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft Yahei", sans-serif;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function createOverlay() {
+    if (overlay) {
+      return;
+    }
+    overlay = document.createElement("div");
+    overlay.id = OVERLAY_ID;
+    overlay.textContent = "点击选择元素，Esc 取消";
+    document.body.appendChild(overlay);
+  }
+
+  function removeOverlay() {
+    if (overlay && overlay.parentNode) {
+      overlay.parentNode.removeChild(overlay);
+    }
+    overlay = null;
+  }
+
+  function clearHighlight() {
+    if (lastHighlighted) {
+      lastHighlighted.classList.remove(HIGHLIGHT_CLASS);
+      lastHighlighted = null;
+    }
+  }
+
+  function highlightElement(target) {
+    if (!target || target === lastHighlighted) {
+      return;
+    }
+    clearHighlight();
+    target.classList.add(HIGHLIGHT_CLASS);
+    lastHighlighted = target;
+  }
+
+  function isOverlayTarget(target) {
+    return target && (target.id === OVERLAY_ID || target.closest(`#${OVERLAY_ID}`));
+  }
+
+  function startSelection(keepStyles) {
+    if (selecting) {
+      return;
+    }
+    preserveStyles = Boolean(keepStyles);
+    selecting = true;
+    ensureStyleTag();
+    createOverlay();
+
+    document.addEventListener("mouseover", onMouseOver, true);
+    document.addEventListener("click", onClick, true);
+    document.addEventListener("keydown", onKeyDown, true);
+  }
+
+  function stopSelection() {
+    if (!selecting) {
+      return;
+    }
+    selecting = false;
+    document.removeEventListener("mouseover", onMouseOver, true);
+    document.removeEventListener("click", onClick, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    clearHighlight();
+    removeOverlay();
+  }
+
+  function onMouseOver(event) {
+    if (!selecting) {
+      return;
+    }
+    const target = event.target;
+    if (!target || isOverlayTarget(target)) {
+      return;
+    }
+    highlightElement(target);
+  }
+
+  function onClick(event) {
+    if (!selecting) {
+      return;
+    }
+    const target = event.target;
+    if (!target || isOverlayTarget(target)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    stopSelection();
+    exportElementToPdf(target);
+  }
+
+  function onKeyDown(event) {
+    if (!selecting) {
+      return;
+    }
+    if (event.key === "Escape") {
+      stopSelection();
+    }
+  }
+
+  function removeScriptTags(root) {
+    const scripts = root.querySelectorAll("script");
+    scripts.forEach((node) => node.remove());
+  }
+
+  function stripEventHandlers(node) {
+    if (!node.attributes) {
+      return;
+    }
+    Array.from(node.attributes).forEach((attr) => {
+      if (attr.name.toLowerCase().startsWith("on")) {
+        node.removeAttribute(attr.name);
+      }
+    });
+  }
+
+  function inlineComputedStyle(source, target) {
+    const computed = window.getComputedStyle(source);
+    let cssText = "";
+    for (let i = 0; i < computed.length; i += 1) {
+      const prop = computed[i];
+      cssText += `${prop}:${computed.getPropertyValue(prop)};`;
+    }
+    const existing = target.getAttribute("style");
+    target.setAttribute("style", existing ? `${existing};${cssText}` : cssText);
+  }
+
+  function syncImageSource(source, target) {
+    if (!(source instanceof HTMLImageElement) || !(target instanceof HTMLImageElement)) {
+      return;
+    }
+    const currentSrc = source.currentSrc || source.src;
+    if (currentSrc) {
+      target.src = currentSrc;
+      target.removeAttribute("srcset");
+      target.removeAttribute("sizes");
+    }
+    target.removeAttribute("loading");
+    target.decoding = "sync";
+  }
+
+  function stripPresentationAttributes(node) {
+    if (!node || !node.removeAttribute) {
+      return;
+    }
+    node.removeAttribute("style");
+    node.removeAttribute("class");
+    node.removeAttribute("id");
+  }
+
+  function syncFormValue(source, target) {
+    if (source instanceof HTMLInputElement) {
+      target.setAttribute("value", source.value);
+      if (source.type === "checkbox" || source.type === "radio") {
+        if (source.checked) {
+          target.setAttribute("checked", "checked");
+        } else {
+          target.removeAttribute("checked");
+        }
+      }
+    }
+
+    if (source instanceof HTMLTextAreaElement) {
+      target.textContent = source.value;
+    }
+
+    if (source instanceof HTMLSelectElement) {
+      const sourceOptions = Array.from(source.options);
+      const targetOptions = Array.from(target.options || []);
+      sourceOptions.forEach((option, index) => {
+        const targetOption = targetOptions[index];
+        if (targetOption) {
+          if (option.selected) {
+            targetOption.setAttribute("selected", "selected");
+          } else {
+            targetOption.removeAttribute("selected");
+          }
+        }
+      });
+    }
+  }
+
+  function replaceCanvasWithImage(sourceCanvas, targetCanvas, inlineStyles) {
+    const img = document.createElement("img");
+    img.width = sourceCanvas.width;
+    img.height = sourceCanvas.height;
+
+    try {
+      img.src = sourceCanvas.toDataURL("image/png");
+    } catch (error) {
+      img.alt = "[canvas]";
+    }
+
+    if (inlineStyles) {
+      inlineComputedStyle(sourceCanvas, img);
+    }
+
+    targetCanvas.replaceWith(img);
+  }
+
+  function prepareClone(sourceRoot, cloneRoot, options) {
+    removeScriptTags(cloneRoot);
+
+    const sourceNodes = [sourceRoot, ...sourceRoot.querySelectorAll("*")];
+    const cloneNodes = [cloneRoot, ...cloneRoot.querySelectorAll("*")];
+    const inlineStyles = options && options.inlineStyles;
+    const stripStyles = options && options.stripStyles;
+    const syncImages = options && options.syncImages;
+
+    for (let i = 0; i < sourceNodes.length; i += 1) {
+      const sourceNode = sourceNodes[i];
+      let cloneNode = cloneNodes[i];
+
+      if (!cloneNode) {
+        continue;
+      }
+
+      stripEventHandlers(cloneNode);
+      if (stripStyles) {
+        stripPresentationAttributes(cloneNode);
+      }
+      if (syncImages) {
+        syncImageSource(sourceNode, cloneNode);
+      }
+      syncFormValue(sourceNode, cloneNode);
+
+      if (sourceNode instanceof HTMLCanvasElement) {
+        replaceCanvasWithImage(sourceNode, cloneNode, inlineStyles);
+        continue;
+      }
+
+      if (inlineStyles) {
+        inlineComputedStyle(sourceNode, cloneNode);
+      }
+    }
+  }
+
+  function buildPrintHtml(target, keepStyles) {
+    const clone = target.cloneNode(true);
+    prepareClone(target, clone, {
+      inlineStyles: keepStyles,
+      stripStyles: !keepStyles,
+      syncImages: true
+    });
+
+    const wrapper = document.createElement("div");
+    wrapper.appendChild(clone);
+    const htmlContent = wrapper.innerHTML;
+
+    const baseHref = document.baseURI || location.href;
+    const baseTag = baseHref ? `<base href="${baseHref}">` : "";
+    const bodyStyle = keepStyles
+      ? "margin:0;padding:16px;background:#ffffff;"
+      : "margin:0;padding:16px;font-family:Arial, sans-serif;background:#ffffff;";
+
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    ${baseTag}
+    <title>Exported Selection</title>
+    <style>
+      @page { margin: 12mm; }
+      body { ${bodyStyle} }
+      * { box-sizing: border-box; }
+    </style>
+  </head>
+  <body>
+    ${htmlContent}
+  </body>
+</html>`;
+  }
+
+  function openPrintWindow(html) {
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) {
+      return false;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+
+    printWindow.onload = () => {
+      const triggerPrint = () => {
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch (error) {
+          // Ignore print errors caused by user settings.
+        }
+      };
+
+      if (printWindow.document.fonts && printWindow.document.fonts.ready) {
+        printWindow.document.fonts.ready.then(() => setTimeout(triggerPrint, 50));
+      } else {
+        setTimeout(triggerPrint, 50);
+      }
+    };
+
+    printWindow.onafterprint = () => {
+      printWindow.close();
+    };
+
+    return true;
+  }
+
+  function cleanupPrintArtifacts() {
+    const container = document.getElementById(PRINT_CONTAINER_ID);
+    if (container) {
+      container.remove();
+    }
+    const style = document.getElementById(PRINT_STYLE_ID);
+    if (style) {
+      style.remove();
+    }
+  }
+
+  function waitForFonts() {
+    if (document.fonts && document.fonts.ready) {
+      return document.fonts.ready;
+    }
+    return Promise.resolve();
+  }
+
+  function waitForImages(root, timeoutMs) {
+    const images = Array.from(root.querySelectorAll("img"));
+    if (!images.length) {
+      return Promise.resolve();
+    }
+
+    const loaders = images.map((img) => {
+      if (img.complete && img.naturalWidth > 0) {
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        const done = () => resolve();
+        img.addEventListener("load", done, { once: true });
+        img.addEventListener("error", done, { once: true });
+      });
+    });
+
+    return Promise.race([
+      Promise.all(loaders),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs))
+    ]);
+  }
+
+  function waitForPrintAssets(container) {
+    return Promise.all([
+      waitForFonts().catch(() => undefined),
+      waitForImages(container, 2000)
+    ]);
+  }
+
+  async function printInPage(target, keepStyles) {
+    cleanupPrintArtifacts();
+
+    const clone = target.cloneNode(true);
+    prepareClone(target, clone, {
+      inlineStyles: keepStyles,
+      stripStyles: !keepStyles,
+      syncImages: true
+    });
+
+    const container = document.createElement("div");
+    container.id = PRINT_CONTAINER_ID;
+    container.style.position = "fixed";
+    container.style.inset = "0";
+    container.style.overflow = "auto";
+    container.style.background = "#ffffff";
+    container.style.padding = "16px";
+    container.style.zIndex = "2147483647";
+    container.appendChild(clone);
+
+    const style = document.createElement("style");
+    style.id = PRINT_STYLE_ID;
+    const resetRules = keepStyles
+      ? ""
+      : `
+        #${PRINT_CONTAINER_ID},
+        #${PRINT_CONTAINER_ID} * {
+          all: revert;
+        }
+        #${PRINT_CONTAINER_ID} {
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          color: #111111;
+        }
+      `;
+
+    style.textContent = `
+      ${resetRules}
+      @media print {
+        body > *:not(#${PRINT_CONTAINER_ID}) {
+          display: none !important;
+        }
+        #${PRINT_CONTAINER_ID} {
+          position: static !important;
+          inset: auto !important;
+          overflow: visible !important;
+          padding: 0 !important;
+        }
+      }
+    `;
+
+    (document.head || document.documentElement).appendChild(style);
+    document.body.appendChild(container);
+
+    const cleanup = () => {
+      cleanupPrintArtifacts();
+    };
+
+    window.addEventListener("afterprint", cleanup, { once: true });
+    await waitForPrintAssets(container);
+    window.print();
+  }
+
+  async function exportElementToPdf(target) {
+    try {
+      await printInPage(target, preserveStyles);
+    } catch (error) {
+      const html = buildPrintHtml(target, preserveStyles);
+      const opened = openPrintWindow(html);
+      if (!opened) {
+        alert("无法打开打印窗口，请检查浏览器弹窗设置。");
+      }
+    }
+  }
+
+  if (api && api.runtime && api.runtime.onMessage) {
+    api.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (!message || !message.type) {
+        if (typeof sendResponse === "function") {
+          sendResponse({ ok: false, error: "Missing message type" });
+        }
+        return;
+      }
+
+      if (message.type === "START_SELECTION") {
+        startSelection(message.preserveStyles);
+        if (typeof sendResponse === "function") {
+          sendResponse({ ok: true });
+        }
+        return;
+      }
+
+      if (message.type === "CANCEL_SELECTION") {
+        stopSelection();
+        if (typeof sendResponse === "function") {
+          sendResponse({ ok: true });
+        }
+        return;
+      }
+
+      if (typeof sendResponse === "function") {
+        sendResponse({ ok: false, error: "Unknown message type" });
+      }
+    });
+  }
+})();

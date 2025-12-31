@@ -1,0 +1,60 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft Yahei", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f7f8fb;
+  color: #1a1f36;
+}
+
+.container {
+  width: 260px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+h1 {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+button {
+  background: #1a73e8;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+button:hover {
+  background: #1558b0;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  color: #596079;
+  line-height: 1.4;
+}
+
+.status {
+  margin: 0;
+  font-size: 12px;
+  color: #cf4a45;
+  min-height: 16px;
+}
