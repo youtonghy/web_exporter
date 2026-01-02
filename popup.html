@@ -3,14 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>网页元素导出 PDF</title>
+    <title>网页元素导出</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <div class="container">
-      <h1>网页元素导出 PDF</h1>
+      <h1>网页元素导出</h1>
 
-      <label class="toggle">
+      <label class="field">
+        <span class="label">导出格式</span>
+        <select id="exportFormat">
+          <option value="pdf" selected>PDF</option>
+          <option value="markdown">Markdown</option>
+        </select>
+      </label>
+
+      <label class="toggle" id="preserveStylesRow">
         <input id="preserveStyles" type="checkbox" checked />
         <span>保留格式（样式）</span>
       </label>

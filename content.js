@@ -4,9 +4,39 @@
   const STYLE_ID = "__web_exporter_style__";
   const PRINT_CONTAINER_ID = "__web_exporter_print_container__";
   const PRINT_STYLE_ID = "__web_exporter_print_style__";
+  const BLOCK_TAGS = new Set([
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "div",
+    "dl",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "ul"
+  ]);
 
   let selecting = false;
   let preserveStyles = true;
+  let exportFormat = "pdf";
   let lastHighlighted = null;
   let overlay = null;
 
@@ -78,11 +108,12 @@
     return target && (target.id === OVERLAY_ID || target.closest(`#${OVERLAY_ID}`));
   }
 
-  function startSelection(keepStyles) {
+  function startSelection(keepStyles, format) {
     if (selecting) {
       return;
     }
     preserveStyles = Boolean(keepStyles);
+    exportFormat = format === "markdown" ? "markdown" : "pdf";
     selecting = true;
     ensureStyleTag();
     createOverlay();
@@ -129,7 +160,11 @@
     event.stopImmediatePropagation();
 
     stopSelection();
-    exportElementToPdf(target);
+    if (exportFormat === "markdown") {
+      exportElementToMarkdown(target);
+    } else {
+      exportElementToPdf(target);
+    }
   }
 
   function onKeyDown(event) {
@@ -189,6 +224,279 @@
     node.removeAttribute("style");
     node.removeAttribute("class");
     node.removeAttribute("id");
+  }
+
+  function normalizeWhitespace(text) {
+    return text.replace(/\u00a0/g, " ").replace(/\s+/g, " ");
+  }
+
+  function escapeMarkdownText(text) {
+    return text
+      .replace(/\\/g, "\\\\")
+      .replace(/`/g, "\\`")
+      .replace(/\*/g, "\\*")
+      .replace(/_/g, "\\_")
+      .replace(/\[/g, "\\[")
+      .replace(/]/g, "\\]")
+      .replace(/#/g, "\\#")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function normalizeMarkdown(text) {
+    return text
+      .replace(/\r\n/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function isIgnorableTag(tag) {
+    return tag === "script" || tag === "style" || tag === "noscript";
+  }
+
+  function convertInlineChildren(node, context) {
+    return Array.from(node.childNodes)
+      .map((child) => convertInlineNode(child, context))
+      .join("");
+  }
+
+  function formatInputValue(node) {
+    if (!(node instanceof HTMLInputElement)) {
+      return "";
+    }
+    const type = (node.getAttribute("type") || "text").toLowerCase();
+    if (type === "checkbox" || type === "radio") {
+      return node.checked ? "[x]" : "[ ]";
+    }
+    return escapeMarkdownText(node.value || "");
+  }
+
+  function formatSelectValue(node) {
+    if (!(node instanceof HTMLSelectElement)) {
+      return "";
+    }
+    const selected = node.querySelector("option:checked");
+    const text = selected ? selected.textContent : node.textContent;
+    return escapeMarkdownText(normalizeWhitespace(text || ""));
+  }
+
+  function convertInlineNode(node, context) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = normalizeWhitespace(node.nodeValue || "");
+      return escapeMarkdownText(text);
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+    const tag = node.tagName.toLowerCase();
+    if (isIgnorableTag(tag)) {
+      return "";
+    }
+    if (tag === "br") {
+      return "\n";
+    }
+    if (tag === "strong" || tag === "b") {
+      const content = convertInlineChildren(node, context).trim();
+      return content ? `**${content}**` : "";
+    }
+    if (tag === "em" || tag === "i") {
+      const content = convertInlineChildren(node, context).trim();
+      return content ? `*${content}*` : "";
+    }
+    if (tag === "code") {
+      const content = node.textContent || "";
+      return content ? `\`${escapeMarkdownText(content)}\`` : "";
+    }
+    if (tag === "a") {
+      const href = node.getAttribute("href");
+      const text = convertInlineChildren(node, context).trim() || escapeMarkdownText(node.textContent || "");
+      if (!href) {
+        return text;
+      }
+      return `[${text || href}](${href})`;
+    }
+    if (tag === "img") {
+      const alt = escapeMarkdownText(node.getAttribute("alt") || "");
+      const src = node.getAttribute("src") || "";
+      if (!src) {
+        return alt;
+      }
+      return `![${alt}](${src})`;
+    }
+    if (tag === "input") {
+      return formatInputValue(node);
+    }
+    if (tag === "textarea") {
+      return escapeMarkdownText(node.value || node.textContent || "");
+    }
+    if (tag === "select") {
+      return formatSelectValue(node);
+    }
+    return convertInlineChildren(node, context);
+  }
+
+  function convertBlockChildren(node, context) {
+    const blocks = [];
+    node.childNodes.forEach((child) => {
+      const block = convertNode(child, context);
+      if (block && block.trim()) {
+        blocks.push(block.trim());
+      }
+    });
+    return blocks.join("\n\n");
+  }
+
+  function convertListItem(node, context) {
+    const blocks = [];
+    const inlineParts = [];
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const tag = child.tagName.toLowerCase();
+        if (tag === "ul" || tag === "ol") {
+          if (inlineParts.length) {
+            const inlineText = inlineParts.join("").trim();
+            if (inlineText) {
+              blocks.push(inlineText);
+            }
+            inlineParts.length = 0;
+          }
+          const nested = convertList(child, context);
+          if (nested) {
+            blocks.push(nested);
+          }
+          return;
+        }
+        if (BLOCK_TAGS.has(tag) && tag !== "li") {
+          if (inlineParts.length) {
+            const inlineText = inlineParts.join("").trim();
+            if (inlineText) {
+              blocks.push(inlineText);
+            }
+            inlineParts.length = 0;
+          }
+          const block = convertNode(child, context);
+          if (block) {
+            blocks.push(block);
+          }
+          return;
+        }
+      }
+      inlineParts.push(convertInlineNode(child, context));
+    });
+
+    if (inlineParts.length) {
+      const inlineText = inlineParts.join("").trim();
+      if (inlineText) {
+        blocks.push(inlineText);
+      }
+    }
+
+    return blocks.join("\n");
+  }
+
+  function convertList(node, context) {
+    const ordered = node.tagName.toLowerCase() === "ol";
+    let index = Number.parseInt(node.getAttribute("start") || "1", 10);
+    if (!Number.isFinite(index) || index < 1) {
+      index = 1;
+    }
+
+    const lines = [];
+    node.childNodes.forEach((child) => {
+      if (!child.tagName || child.tagName.toLowerCase() !== "li") {
+        return;
+      }
+      const itemContext = { ...context, listDepth: (context.listDepth || 0) + 1 };
+      const content = convertListItem(child, itemContext).trim();
+      if (!content) {
+        index += 1;
+        return;
+      }
+      const indent = "  ".repeat(context.listDepth || 0);
+      const prefix = ordered ? `${index}. ` : "- ";
+      const indentedContent = content.replace(/\n/g, `\n${indent}  `);
+      lines.push(`${indent}${prefix}${indentedContent}`);
+      index += 1;
+    });
+    return lines.join("\n");
+  }
+
+  function convertNode(node, context) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = normalizeWhitespace(node.nodeValue || "");
+      return escapeMarkdownText(text);
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    const tag = node.tagName.toLowerCase();
+    if (isIgnorableTag(tag)) {
+      return "";
+    }
+
+    if (tag === "h1" || tag === "h2" || tag === "h3" || tag === "h4" || tag === "h5" || tag === "h6") {
+      const level = Number.parseInt(tag.slice(1), 10);
+      const content = convertInlineChildren(node, context).trim();
+      return content ? `${"#".repeat(level)} ${content}` : "";
+    }
+    if (tag === "p") {
+      return convertInlineChildren(node, context).trim();
+    }
+    if (tag === "pre") {
+      const content = node.textContent || "";
+      return `\`\`\`\n${content.replace(/\n$/, "")}\n\`\`\``;
+    }
+    if (tag === "blockquote") {
+      const content = convertBlockChildren(node, context);
+      if (!content) {
+        return "";
+      }
+      return content
+        .split("\n")
+        .map((line) => (line ? `> ${line}` : ">"))
+        .join("\n");
+    }
+    if (tag === "ul" || tag === "ol") {
+      return convertList(node, context);
+    }
+    if (tag === "hr") {
+      return "---";
+    }
+    if (tag === "br") {
+      return "\n";
+    }
+    if (BLOCK_TAGS.has(tag)) {
+      return convertBlockChildren(node, context);
+    }
+    return convertInlineChildren(node, context).trim();
+  }
+
+  function elementToMarkdown(root) {
+    const content = convertBlockChildren(root, { listDepth: 0 });
+    return normalizeMarkdown(content);
+  }
+
+  function sanitizeFilename(name) {
+    const trimmed = (name || "").trim();
+    const base = trimmed || "exported-selection";
+    return base.replace(/[\\/:*?"<>|]+/g, "_");
+  }
+
+  function downloadMarkdown(content, filename) {
+    const blob = new Blob([content || ""], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      anchor.remove();
+    }, 0);
   }
 
   function syncFormValue(source, target) {
@@ -503,6 +811,12 @@
     }
   }
 
+  function exportElementToMarkdown(target) {
+    const markdown = elementToMarkdown(target);
+    const filename = `${sanitizeFilename(document.title)}.md`;
+    downloadMarkdown(markdown, filename);
+  }
+
   if (api && api.runtime && api.runtime.onMessage) {
     api.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!message || !message.type) {
@@ -513,7 +827,7 @@
       }
 
       if (message.type === "START_SELECTION") {
-        startSelection(message.preserveStyles);
+        startSelection(message.preserveStyles, message.exportFormat);
         if (typeof sendResponse === "function") {
           sendResponse({ ok: true });
         }

@@ -1,8 +1,11 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
 
 const statusEl = document.getElementById("status");
+const formatSelect = document.getElementById("exportFormat");
 const preserveToggle = document.getElementById("preserveStyles");
+const preserveRow = document.getElementById("preserveStylesRow");
 const selectButton = document.getElementById("selectAndExport");
+let lastPreserveValue = preserveToggle.checked;
 
 function setStatus(message) {
   statusEl.textContent = message || "";
@@ -87,6 +90,23 @@ function injectContentScript(tabId) {
   return Promise.reject(new Error("Scripting API unavailable"));
 }
 
+function updateFormatUI() {
+  const isMarkdown = formatSelect.value === "markdown";
+  if (isMarkdown) {
+    lastPreserveValue = preserveToggle.checked;
+    preserveToggle.checked = false;
+    preserveToggle.disabled = true;
+    preserveRow.classList.add("is-disabled");
+  } else {
+    preserveToggle.disabled = false;
+    preserveRow.classList.remove("is-disabled");
+    preserveToggle.checked = lastPreserveValue;
+  }
+}
+
+formatSelect.addEventListener("change", updateFormatUI);
+updateFormatUI();
+
 selectButton.addEventListener("click", async () => {
   setStatus("");
   selectButton.disabled = true;
@@ -100,7 +120,8 @@ selectButton.addEventListener("click", async () => {
 
     const payload = {
       type: "START_SELECTION",
-      preserveStyles: preserveToggle.checked
+      preserveStyles: preserveToggle.checked,
+      exportFormat: formatSelect.value
     };
 
     try {
