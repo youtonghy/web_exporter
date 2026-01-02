@@ -278,7 +278,7 @@
     }
   }
 
-  function buildPrintHtml(target, keepStyles) {
+  function buildPrintPayload(target, keepStyles) {
     const clone = target.cloneNode(true);
     prepareClone(target, clone, {
       inlineStyles: keepStyles,
@@ -286,61 +286,92 @@
       syncImages: true
     });
 
-    const wrapper = document.createElement("div");
-    wrapper.appendChild(clone);
-    const htmlContent = wrapper.innerHTML;
-
     const baseHref = document.baseURI || location.href;
-    const baseTag = baseHref ? `<base href="${baseHref}">` : "";
     const bodyStyle = keepStyles
       ? "margin:0;padding:16px;background:#ffffff;"
       : "margin:0;padding:16px;font-family:Arial, sans-serif;background:#ffffff;";
 
-    return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    ${baseTag}
-    <title>Exported Selection</title>
-    <style>
+    return { clone, baseHref, bodyStyle };
+  }
+
+  function populatePrintDocument(doc, payload) {
+    const { clone, baseHref, bodyStyle } = payload;
+
+    while (doc.head.firstChild) {
+      doc.head.removeChild(doc.head.firstChild);
+    }
+    while (doc.body.firstChild) {
+      doc.body.removeChild(doc.body.firstChild);
+    }
+
+    const metaCharset = doc.createElement("meta");
+    metaCharset.setAttribute("charset", "utf-8");
+
+    const metaViewport = doc.createElement("meta");
+    metaViewport.setAttribute("name", "viewport");
+    metaViewport.setAttribute("content", "width=device-width, initial-scale=1");
+
+    doc.head.appendChild(metaCharset);
+    doc.head.appendChild(metaViewport);
+
+    if (baseHref) {
+      const base = doc.createElement("base");
+      base.setAttribute("href", baseHref);
+      doc.head.appendChild(base);
+    }
+
+    const style = doc.createElement("style");
+    style.textContent = `
       @page { margin: 12mm; }
       body { ${bodyStyle} }
       * { box-sizing: border-box; }
-    </style>
-  </head>
-  <body>
-    ${htmlContent}
-  </body>
-</html>`;
+    `;
+    doc.head.appendChild(style);
+    doc.title = "Exported Selection";
+
+    const imported = doc.importNode(clone, true);
+    doc.body.appendChild(imported);
   }
 
-  function openPrintWindow(html) {
+  function openPrintWindow(payload) {
     const printWindow = window.open("", "_blank", "noopener,noreferrer");
     if (!printWindow) {
       return false;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
+    const doc = printWindow.document;
+    populatePrintDocument(doc, payload);
 
-    printWindow.onload = () => {
-      const triggerPrint = () => {
-        try {
-          printWindow.focus();
-          printWindow.print();
-        } catch (error) {
-          // Ignore print errors caused by user settings.
-        }
-      };
-
-      if (printWindow.document.fonts && printWindow.document.fonts.ready) {
-        printWindow.document.fonts.ready.then(() => setTimeout(triggerPrint, 50));
-      } else {
-        setTimeout(triggerPrint, 50);
+    const triggerPrint = () => {
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch (error) {
+        // Ignore print errors caused by user settings.
       }
     };
+
+    const waitForFontsInDocument = () => {
+      if (doc.fonts && doc.fonts.ready) {
+        return doc.fonts.ready;
+      }
+      return Promise.resolve();
+    };
+
+    const schedulePrint = () => {
+      Promise.all([
+        waitForFontsInDocument().catch(() => undefined),
+        waitForImages(doc.body, 2000)
+      ]).finally(() => {
+        setTimeout(triggerPrint, 50);
+      });
+    };
+
+    if (doc.readyState === "complete") {
+      schedulePrint();
+    } else {
+      printWindow.addEventListener("load", schedulePrint, { once: true });
+    }
 
     printWindow.onafterprint = () => {
       printWindow.close();
@@ -464,8 +495,8 @@
     try {
       await printInPage(target, preserveStyles);
     } catch (error) {
-      const html = buildPrintHtml(target, preserveStyles);
-      const opened = openPrintWindow(html);
+      const payload = buildPrintPayload(target, preserveStyles);
+      const opened = openPrintWindow(payload);
       if (!opened) {
         alert("无法打开打印窗口，请检查浏览器弹窗设置。");
       }
