@@ -3,32 +3,33 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>网页元素导出</title>
+    <title></title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <div class="container">
-      <h1>网页元素导出</h1>
+      <h1 data-i18n="app.title"></h1>
 
       <label class="field">
-        <span class="label">导出格式</span>
+        <span class="label" data-i18n="label.export_format"></span>
         <select id="exportFormat">
-          <option value="pdf" selected>PDF</option>
-          <option value="markdown">Markdown</option>
+          <option value="pdf" selected data-i18n="option.pdf"></option>
+          <option value="markdown" data-i18n="option.markdown"></option>
         </select>
       </label>
 
       <label class="toggle" id="preserveStylesRow">
         <input id="preserveStyles" type="checkbox" checked />
-        <span>保留格式（样式）</span>
+        <span data-i18n="toggle.preserve_styles"></span>
       </label>
 
-      <button id="selectAndExport" type="button">选择元素并导出</button>
+      <button id="selectAndExport" type="button" data-i18n="button.select_export"></button>
 
-      <p class="hint">点击按钮后，在页面上点选元素。按 Esc 取消。</p>
+      <p class="hint" data-i18n="hint.select_element"></p>
       <p id="status" class="status" role="status" aria-live="polite"></p>
     </div>
 
+    <script src="src/i18n/index.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

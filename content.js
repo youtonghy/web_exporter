@@ -41,6 +41,7 @@
   let overlay = null;
 
   const api = typeof browser !== "undefined" ? browser : chrome;
+  const i18n = globalThis.WebExporterI18n;
 
   function ensureStyleTag() {
     if (document.getElementById(STYLE_ID)) {
@@ -77,7 +78,7 @@
     }
     overlay = document.createElement("div");
     overlay.id = OVERLAY_ID;
-    overlay.textContent = "点击选择元素，Esc 取消";
+    overlay.textContent = i18n.t("overlay.select_prompt");
     document.body.appendChild(overlay);
   }
 
@@ -480,7 +481,7 @@
 
   function sanitizeFilename(name) {
     const trimmed = (name || "").trim();
-    const base = trimmed || "exported-selection";
+    const base = trimmed || i18n.t("file.default_name");
     return base.replace(/[\\/:*?"<>|]+/g, "_");
   }
 
@@ -635,7 +636,7 @@
       * { box-sizing: border-box; }
     `;
     doc.head.appendChild(style);
-    doc.title = "Exported Selection";
+    doc.title = i18n.t("print.window_title");
 
     const imported = doc.importNode(clone, true);
     doc.body.appendChild(imported);
@@ -806,7 +807,7 @@
       const payload = buildPrintPayload(target, preserveStyles);
       const opened = openPrintWindow(payload);
       if (!opened) {
-        alert("无法打开打印窗口，请检查浏览器弹窗设置。");
+        alert(i18n.t("alert.print_blocked"));
       }
     }
   }

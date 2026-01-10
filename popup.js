@@ -1,4 +1,6 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
+const i18n = globalThis.WebExporterI18n;
+const { t, applyTranslations, getLocale } = i18n;
 
 const statusEl = document.getElementById("status");
 const formatSelect = document.getElementById("exportFormat");
@@ -6,6 +8,13 @@ const preserveToggle = document.getElementById("preserveStyles");
 const preserveRow = document.getElementById("preserveStylesRow");
 const selectButton = document.getElementById("selectAndExport");
 let lastPreserveValue = preserveToggle.checked;
+
+applyTranslations(document);
+document.documentElement.lang = getLocale();
+document.title = t("app.title");
+if (api.action && api.action.setTitle) {
+  api.action.setTitle({ title: t("action.title") });
+}
 
 function setStatus(message) {
   statusEl.textContent = message || "";
@@ -27,7 +36,7 @@ function formatError(error) {
 function queryActiveTab() {
   return new Promise((resolve, reject) => {
     if (!api.tabs || !api.tabs.query) {
-      reject(new Error("Tabs API unavailable"));
+      reject(new Error(t("error.tabs_unavailable")));
       return;
     }
     api.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -87,7 +96,7 @@ function injectContentScript(tabId) {
     });
   }
 
-  return Promise.reject(new Error("Scripting API unavailable"));
+  return Promise.reject(new Error(t("error.scripting_unavailable")));
 }
 
 function updateFormatUI() {
@@ -115,7 +124,7 @@ selectButton.addEventListener("click", async () => {
     const tabs = await queryActiveTab();
     const tab = tabs && tabs[0];
     if (!tab || typeof tab.id !== "number") {
-      throw new Error("No active tab");
+      throw new Error(t("error.no_active_tab"));
     }
 
     const payload = {
@@ -134,7 +143,7 @@ selectButton.addEventListener("click", async () => {
     window.close();
   } catch (error) {
     const detail = formatError(error);
-    const baseMessage = "无法发送到页面或页面禁止注入脚本，请刷新页面或确认权限。";
+    const baseMessage = t("status.injection_error");
     setStatus(detail ? `${baseMessage} (${detail})` : baseMessage);
   } finally {
     selectButton.disabled = false;
