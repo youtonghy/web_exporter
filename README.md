@@ -15,14 +15,16 @@
 
 开发与加载都使用 `build` 目录，避免直接加载源代码目录造成歧义。
 
-构建（Windows PowerShell）：
+构建（Node.js，跨平台）：
 
-- `powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Target all`
+- `node scripts/build.js --target all`
 
 构建输出：
 
 - `build/chrome/`（Chrome 加载此目录）
 - `build/firefox/`（Firefox 临时加载此目录）
+
+更详细的使用说明见 `BUILDING.md`。
 
 ## 关于上架商店
 
