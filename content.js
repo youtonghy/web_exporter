@@ -259,6 +259,70 @@
     target.decoding = "sync";
   }
 
+  function extractFirstCssUrl(value) {
+    if (!value) {
+      return "";
+    }
+    const match = /url\((['"]?)(.*?)\1\)/.exec(value);
+    if (!match) {
+      return "";
+    }
+    return (match[2] || "").trim();
+  }
+
+  function hasMeaningfulChildren(node) {
+    if (!node || !node.childNodes) {
+      return false;
+    }
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        return true;
+      }
+      if (child.nodeType === Node.TEXT_NODE && (child.nodeValue || "").trim()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function syncBackgroundImageAsImg(source, target) {
+    if (!(source instanceof Element) || !(target instanceof Element)) {
+      return;
+    }
+
+    const computed = window.getComputedStyle(source);
+    const url = extractFirstCssUrl(computed.backgroundImage);
+    if (!url) {
+      return;
+    }
+
+    if (hasMeaningfulChildren(source) || hasMeaningfulChildren(target)) {
+      return;
+    }
+
+    const doc = target.ownerDocument || document;
+    const img = doc.createElement("img");
+    img.src = url;
+    img.alt = source.getAttribute("aria-label") || source.getAttribute("alt") || "";
+    img.loading = "eager";
+    img.decoding = "sync";
+    if ("fetchPriority" in img) {
+      img.fetchPriority = "high";
+    }
+
+    const bgSize = (computed.backgroundSize || "").toLowerCase();
+    const fit = bgSize.includes("cover") ? "cover" : bgSize.includes("contain") ? "contain" : "cover";
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.display = "block";
+    img.style.objectFit = fit;
+
+    target.style.backgroundImage = "none";
+    target.style.background = "none";
+
+    target.appendChild(img);
+  }
+
   function stripPresentationAttributes(node) {
     if (!node || !node.removeAttribute) {
       return;
@@ -599,6 +663,7 @@
     const inlineStyles = options && options.inlineStyles;
     const stripStyles = options && options.stripStyles;
     const syncImages = options && options.syncImages;
+    const enhancedImages = options && options.enhancedImages;
 
     for (let i = 0; i < sourceNodes.length; i += 1) {
       const sourceNode = sourceNodes[i];
@@ -614,6 +679,9 @@
       }
       if (syncImages) {
         syncImageSource(sourceNode, cloneNode);
+        if (enhancedImages) {
+          syncBackgroundImageAsImg(sourceNode, cloneNode);
+        }
       }
       syncFormValue(sourceNode, cloneNode);
 
@@ -628,12 +696,13 @@
     }
   }
 
-  function buildPrintPayload(target, keepStyles) {
+  function buildPrintPayload(target, keepStyles, enhancedImages) {
     const clone = target.cloneNode(true);
     prepareClone(target, clone, {
       inlineStyles: keepStyles,
       stripStyles: !keepStyles,
-      syncImages: true
+      syncImages: true,
+      enhancedImages
     });
 
     const baseHref = document.baseURI || location.href;
@@ -791,7 +860,8 @@
     prepareClone(target, clone, {
       inlineStyles: keepStyles,
       stripStyles: !keepStyles,
-      syncImages: true
+      syncImages: true,
+      enhancedImages
     });
 
     const container = document.createElement("div");
@@ -851,7 +921,7 @@
     try {
       await printInPage(target, preserveStyles, enhancedImageLoading);
     } catch (error) {
-      const payload = buildPrintPayload(target, preserveStyles);
+      const payload = buildPrintPayload(target, preserveStyles, enhancedImageLoading);
       const opened = openPrintWindow(payload, enhancedImageLoading);
       if (!opened) {
         alert(i18n.t("alert.print_blocked"));
