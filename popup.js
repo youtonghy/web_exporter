@@ -104,6 +104,7 @@ function injectContentScript(tabId) {
 
 function updateFormatUI() {
   const isMarkdown = formatSelect.value === "markdown";
+  const isPng = formatSelect.value === "png";
   if (isMarkdown) {
     lastPreserveValue = preserveToggle.checked;
     preserveToggle.checked = false;
@@ -113,6 +114,15 @@ function updateFormatUI() {
     enhancedToggle.checked = false;
     enhancedToggle.disabled = true;
     enhancedRow.classList.add("is-disabled");
+  } else if (isPng) {
+    lastPreserveValue = preserveToggle.checked;
+    preserveToggle.checked = false;
+    preserveToggle.disabled = true;
+    preserveRow.classList.add("is-disabled");
+
+    enhancedToggle.disabled = false;
+    enhancedRow.classList.remove("is-disabled");
+    enhancedToggle.checked = lastEnhancedValue;
   } else {
     preserveToggle.disabled = false;
     preserveRow.classList.remove("is-disabled");

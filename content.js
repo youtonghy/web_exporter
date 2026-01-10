@@ -117,7 +117,7 @@
       return;
     }
     preserveStyles = Boolean(keepStyles);
-    exportFormat = format === "markdown" ? "markdown" : "pdf";
+    exportFormat = format === "markdown" ? "markdown" : format === "png" ? "png" : "pdf";
     enhancedImageLoading = Boolean(enhancedImages);
     selecting = true;
     ensureStyleTag();
@@ -167,6 +167,8 @@
     stopSelection();
     if (exportFormat === "markdown") {
       exportElementToMarkdown(target);
+    } else if (exportFormat === "png") {
+      exportElementToPng(target);
     } else {
       exportElementToPdf(target);
     }
@@ -603,6 +605,134 @@
       URL.revokeObjectURL(url);
       anchor.remove();
     }, 0);
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      anchor.remove();
+    }, 0);
+  }
+
+  function sendRuntimeMessage(message) {
+    if (!api || !api.runtime || typeof api.runtime.sendMessage !== "function") {
+      return Promise.reject(new Error(i18n.t("error.runtime_unavailable")));
+    }
+
+    try {
+      const result = api.runtime.sendMessage(message);
+      if (result && typeof result.then === "function") {
+        return result;
+      }
+    } catch (error) {
+      // Fall back to callback style.
+    }
+
+    return new Promise((resolve, reject) => {
+      api.runtime.sendMessage(message, (response) => {
+        const err = api.runtime && api.runtime.lastError;
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(response);
+      });
+    });
+  }
+
+  async function captureVisibleTabPng() {
+    const response = await sendRuntimeMessage({ type: "CAPTURE_VISIBLE_TAB" });
+    if (response && response.ok && response.dataUrl) {
+      return response.dataUrl;
+    }
+    const error = response && response.error ? response.error : i18n.t("error.capture_failed");
+    throw new Error(error);
+  }
+
+  function decodeImage(img) {
+    if (img && typeof img.decode === "function") {
+      return img.decode().catch(() => undefined);
+    }
+    return new Promise((resolve) => {
+      const done = () => resolve();
+      img.addEventListener("load", done, { once: true });
+      img.addEventListener("error", done, { once: true });
+    });
+  }
+
+  async function exportElementToPng(target) {
+    try {
+      target.scrollIntoView({ block: "center", inline: "nearest" });
+    } catch (error) {
+      // ignore
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    await waitForImages(target, getImageLoadTimeout(enhancedImageLoading), enhancedImageLoading).catch(() => undefined);
+
+    const rect = target.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (!viewportWidth || !viewportHeight) {
+      alert(i18n.t("error.capture_failed"));
+      return;
+    }
+
+    const left = Math.max(0, Math.floor(rect.left));
+    const top = Math.max(0, Math.floor(rect.top));
+    const right = Math.min(viewportWidth, Math.ceil(rect.right));
+    const bottom = Math.min(viewportHeight, Math.ceil(rect.bottom));
+    if (right <= left || bottom <= top) {
+      alert(i18n.t("alert.png_not_visible"));
+      return;
+    }
+
+    const dataUrl = await captureVisibleTabPng();
+    const screenshot = new Image();
+    screenshot.src = dataUrl;
+    await decodeImage(screenshot);
+
+    const imageWidth = screenshot.naturalWidth || screenshot.width;
+    const imageHeight = screenshot.naturalHeight || screenshot.height;
+    if (!imageWidth || !imageHeight) {
+      alert(i18n.t("error.capture_failed"));
+      return;
+    }
+
+    const scaleX = imageWidth / viewportWidth;
+    const scaleY = imageHeight / viewportHeight;
+
+    const sx = Math.max(0, Math.round(left * scaleX));
+    const sy = Math.max(0, Math.round(top * scaleY));
+    const sw = Math.max(1, Math.round((right - left) * scaleX));
+    const sh = Math.max(1, Math.round((bottom - top) * scaleY));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      alert(i18n.t("error.capture_failed"));
+      return;
+    }
+
+    ctx.drawImage(screenshot, sx, sy, sw, sh, 0, 0, sw, sh);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) {
+      alert(i18n.t("error.capture_failed"));
+      return;
+    }
+
+    const filename = `${sanitizeFilename(document.title)}.png`;
+    downloadBlob(blob, filename);
   }
 
   function syncFormValue(source, target) {
