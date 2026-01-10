@@ -4,6 +4,8 @@
   const STYLE_ID = "__web_exporter_style__";
   const PRINT_CONTAINER_ID = "__web_exporter_print_container__";
   const PRINT_STYLE_ID = "__web_exporter_print_style__";
+  const IMAGE_LOAD_TIMEOUT_MS = 2000;
+  const ENHANCED_IMAGE_LOAD_TIMEOUT_MS = 8000;
   const BLOCK_TAGS = new Set([
     "address",
     "article",
@@ -37,6 +39,7 @@
   let selecting = false;
   let preserveStyles = true;
   let exportFormat = "pdf";
+  let enhancedImageLoading = false;
   let lastHighlighted = null;
   let overlay = null;
 
@@ -109,12 +112,13 @@
     return target && (target.id === OVERLAY_ID || target.closest(`#${OVERLAY_ID}`));
   }
 
-  function startSelection(keepStyles, format) {
+  function startSelection(keepStyles, format, enhancedImages) {
     if (selecting) {
       return;
     }
     preserveStyles = Boolean(keepStyles);
     exportFormat = format === "markdown" ? "markdown" : "pdf";
+    enhancedImageLoading = Boolean(enhancedImages);
     selecting = true;
     ensureStyleTag();
     createOverlay();
@@ -202,6 +206,43 @@
     }
     const existing = target.getAttribute("style");
     target.setAttribute("style", existing ? `${existing};${cssText}` : cssText);
+  }
+
+  function getAttributeValue(node, name) {
+    if (!node || !node.getAttribute) {
+      return "";
+    }
+    const value = node.getAttribute(name);
+    return value ? value.trim() : "";
+  }
+
+  function prepareImagesForPrint(images, enhancedImages) {
+    if (!enhancedImages || !images.length) {
+      return;
+    }
+    images.forEach((img) => {
+      const src = getAttributeValue(img, "src");
+      const dataSrc = getAttributeValue(img, "data-src");
+      if (!src && dataSrc) {
+        img.setAttribute("src", dataSrc);
+      }
+
+      const srcset = getAttributeValue(img, "srcset");
+      const dataSrcset = getAttributeValue(img, "data-srcset");
+      if (!srcset && dataSrcset) {
+        img.setAttribute("srcset", dataSrcset);
+      }
+
+      img.loading = "eager";
+      img.decoding = "sync";
+      if ("fetchPriority" in img) {
+        img.fetchPriority = "high";
+      }
+    });
+  }
+
+  function getImageLoadTimeout(enhancedImages) {
+    return enhancedImages ? ENHANCED_IMAGE_LOAD_TIMEOUT_MS : IMAGE_LOAD_TIMEOUT_MS;
   }
 
   function syncImageSource(source, target) {
@@ -642,7 +683,7 @@
     doc.body.appendChild(imported);
   }
 
-  function openPrintWindow(payload) {
+  function openPrintWindow(payload, enhancedImages) {
     const printWindow = window.open("", "_blank", "noopener,noreferrer");
     if (!printWindow) {
       return false;
@@ -670,7 +711,7 @@
     const schedulePrint = () => {
       Promise.all([
         waitForFontsInDocument().catch(() => undefined),
-        waitForImages(doc.body, 2000)
+        waitForImages(doc.body, getImageLoadTimeout(enhancedImages), enhancedImages)
       ]).finally(() => {
         setTimeout(triggerPrint, 50);
       });
@@ -707,21 +748,27 @@
     return Promise.resolve();
   }
 
-  function waitForImages(root, timeoutMs) {
+  function waitForImages(root, timeoutMs, enhancedImages) {
     const images = Array.from(root.querySelectorAll("img"));
     if (!images.length) {
       return Promise.resolve();
     }
 
+    prepareImagesForPrint(images, enhancedImages);
+
     const loaders = images.map((img) => {
       if (img.complete && img.naturalWidth > 0) {
         return Promise.resolve();
       }
-      return new Promise((resolve) => {
+      const loadPromise = new Promise((resolve) => {
         const done = () => resolve();
         img.addEventListener("load", done, { once: true });
         img.addEventListener("error", done, { once: true });
       });
+      if (enhancedImages && typeof img.decode === "function") {
+        return img.decode().then(() => undefined, () => loadPromise);
+      }
+      return loadPromise;
     });
 
     return Promise.race([
@@ -730,14 +777,14 @@
     ]);
   }
 
-  function waitForPrintAssets(container) {
+  function waitForPrintAssets(container, enhancedImages) {
     return Promise.all([
       waitForFonts().catch(() => undefined),
-      waitForImages(container, 2000)
+      waitForImages(container, getImageLoadTimeout(enhancedImages), enhancedImages)
     ]);
   }
 
-  async function printInPage(target, keepStyles) {
+  async function printInPage(target, keepStyles, enhancedImages) {
     cleanupPrintArtifacts();
 
     const clone = target.cloneNode(true);
@@ -796,16 +843,16 @@
     };
 
     window.addEventListener("afterprint", cleanup, { once: true });
-    await waitForPrintAssets(container);
+    await waitForPrintAssets(container, enhancedImages);
     window.print();
   }
 
   async function exportElementToPdf(target) {
     try {
-      await printInPage(target, preserveStyles);
+      await printInPage(target, preserveStyles, enhancedImageLoading);
     } catch (error) {
       const payload = buildPrintPayload(target, preserveStyles);
-      const opened = openPrintWindow(payload);
+      const opened = openPrintWindow(payload, enhancedImageLoading);
       if (!opened) {
         alert(i18n.t("alert.print_blocked"));
       }
@@ -828,7 +875,7 @@
       }
 
       if (message.type === "START_SELECTION") {
-        startSelection(message.preserveStyles, message.exportFormat);
+        startSelection(message.preserveStyles, message.exportFormat, message.enhancedImageLoading);
         if (typeof sendResponse === "function") {
           sendResponse({ ok: true });
         }

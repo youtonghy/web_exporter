@@ -6,8 +6,11 @@ const statusEl = document.getElementById("status");
 const formatSelect = document.getElementById("exportFormat");
 const preserveToggle = document.getElementById("preserveStyles");
 const preserveRow = document.getElementById("preserveStylesRow");
+const enhancedToggle = document.getElementById("enhancedImageLoading");
+const enhancedRow = document.getElementById("enhancedImageLoadingRow");
 const selectButton = document.getElementById("selectAndExport");
 let lastPreserveValue = preserveToggle.checked;
+let lastEnhancedValue = enhancedToggle.checked;
 
 applyTranslations(document);
 document.documentElement.lang = getLocale();
@@ -106,10 +109,17 @@ function updateFormatUI() {
     preserveToggle.checked = false;
     preserveToggle.disabled = true;
     preserveRow.classList.add("is-disabled");
+    lastEnhancedValue = enhancedToggle.checked;
+    enhancedToggle.checked = false;
+    enhancedToggle.disabled = true;
+    enhancedRow.classList.add("is-disabled");
   } else {
     preserveToggle.disabled = false;
     preserveRow.classList.remove("is-disabled");
     preserveToggle.checked = lastPreserveValue;
+    enhancedToggle.disabled = false;
+    enhancedRow.classList.remove("is-disabled");
+    enhancedToggle.checked = lastEnhancedValue;
   }
 }
 
@@ -130,7 +140,8 @@ selectButton.addEventListener("click", async () => {
     const payload = {
       type: "START_SELECTION",
       preserveStyles: preserveToggle.checked,
-      exportFormat: formatSelect.value
+      exportFormat: formatSelect.value,
+      enhancedImageLoading: enhancedToggle.checked
     };
 
     try {
