@@ -13,7 +13,7 @@
 - Chrome：Manifest V3（service worker）
 - Firefox：Manifest V2（background scripts）
 
-仓库根目录的 `manifest.json` 采用 Firefox 的 MV2 配置，Chrome 请使用构建产物目录。
+开发与加载都使用 `build` 目录，避免直接加载源代码目录造成歧义。
 
 构建（Windows PowerShell）：
 
@@ -21,8 +21,8 @@
 
 构建输出：
 
-- `dist/chrome-mv3/`（Chrome 加载此目录）
-- `dist/firefox-mv2/`（Firefox 临时加载此目录）
+- `build/chrome/`（Chrome 加载此目录）
+- `build/firefox/`（Firefox 临时加载此目录）
 
 ## 关于上架商店
 

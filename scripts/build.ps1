@@ -6,9 +6,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
-$distRoot = Join-Path $repoRoot 'dist'
+$buildRoot = Join-Path $repoRoot 'build'
 
-function Reset-DistFolder([string]$path) {
+function Reset-BuildFolder([string]$path) {
   if (Test-Path $path) {
     Remove-Item -Recurse -Force $path
   }
@@ -36,8 +36,8 @@ function Copy-ExtensionFiles([string]$outDir) {
 }
 
 function New-ChromeMv3Package() {
-  $outDir = Join-Path $distRoot 'chrome-mv3'
-  Reset-DistFolder $outDir
+  $outDir = Join-Path $buildRoot 'chrome'
+  Reset-BuildFolder $outDir
 
   Copy-ExtensionFiles $outDir
 
@@ -48,8 +48,8 @@ function New-ChromeMv3Package() {
 }
 
 function New-FirefoxMv2Package() {
-  $outDir = Join-Path $distRoot 'firefox-mv2'
-  Reset-DistFolder $outDir
+  $outDir = Join-Path $buildRoot 'firefox'
+  Reset-BuildFolder $outDir
 
   Copy-ExtensionFiles $outDir
 
@@ -59,7 +59,7 @@ function New-FirefoxMv2Package() {
   Write-Host "Built: $outDir"
 }
 
-Reset-DistFolder $distRoot | Out-Null
+Reset-BuildFolder $buildRoot | Out-Null
 
 switch ($Target) {
   'chrome' { New-ChromeMv3Package }
