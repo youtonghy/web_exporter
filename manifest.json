@@ -1,5 +1,5 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 2,
   "name": "Web Exporter",
   "version": "1.0.0",
   "description": "Export selected page elements to PDF or Markdown.",
@@ -18,7 +18,7 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "action": {
+  "browser_action": {
     "default_popup": "popup.html",
     "default_title": "Export element",
     "default_icon": {
@@ -30,12 +30,13 @@
   },
   "permissions": [
     "activeTab",
-    "scripting",
     "tabs"
+    ,"<all_urls>"
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
   "content_scripts": [
     {
       "matches": [
@@ -47,8 +48,5 @@
       ],
       "run_at": "document_idle"
     }
-  ],
-  "background": {
-    "service_worker": "background.js"
-  }
+  ]
 }

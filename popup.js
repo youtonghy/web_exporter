@@ -17,6 +17,8 @@ document.documentElement.lang = getLocale();
 document.title = t("app.title");
 if (api.action && api.action.setTitle) {
   api.action.setTitle({ title: t("action.title") });
+} else if (api.browserAction && api.browserAction.setTitle) {
+  api.browserAction.setTitle({ title: t("action.title") });
 }
 
 function setStatus(message) {
