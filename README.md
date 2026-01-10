@@ -6,6 +6,22 @@
 
 我已经打包了适用于Chrome浏览器的CRX，并发表在release中可以直接下载并使用。如果你的Chrome浏览器不支持的话，可以请先开启开发者模式。
 
+## Chrome (MV3) 与 Firefox (MV2) 同时兼容
+
+由于 Firefox 临时附加组件加载时可能禁用 `background.service_worker`，本项目采用“分别构建两份产物”的方式：
+
+- Chrome：Manifest V3（service worker）
+- Firefox：Manifest V2（background scripts）
+
+构建（Windows PowerShell）：
+
+- `powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Target all`
+
+构建输出：
+
+- `dist/chrome-mv3/`（Chrome 加载此目录）
+- `dist/firefox-mv2/`（Firefox 临时加载此目录）
+
 ## 关于上架商店
 
 其实我本来是有这个打算，因为这样会更方便一点。尤其是现在谷歌一直在收紧 Chrome 安装第三方浏览器插件的权限，但是这个似乎是要钱的。我觉得我还没有必要去搞一个这个东西的，在这方面有额外的投资。如果哪位大神有账号可以帮我上传一下，那么感激不尽。
