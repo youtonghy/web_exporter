@@ -13,6 +13,8 @@
 - Chrome：Manifest V3（service worker）
 - Firefox：Manifest V2（background scripts）
 
+仓库根目录的 `manifest.json` 采用 Firefox 的 MV2 配置，Chrome 请使用构建产物目录。
+
 构建（Windows PowerShell）：
 
 - `powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Target all`
