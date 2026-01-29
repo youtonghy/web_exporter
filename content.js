@@ -1,5 +1,6 @@
 (() => {
   const HIGHLIGHT_CLASS = "__web_exporter_highlight__";
+  const SELECTED_CLASS = "__web_exporter_selected__";
   const OVERLAY_ID = "__web_exporter_overlay__";
   const STYLE_ID = "__web_exporter_style__";
   const PRINT_CONTAINER_ID = "__web_exporter_print_container__";
@@ -41,6 +42,7 @@
   let exportFormat = "pdf";
   let enhancedImageLoading = false;
   let lastHighlighted = null;
+  let selectedTargets = [];
   let overlay = null;
 
   const api = typeof browser !== "undefined" ? browser : chrome;
@@ -56,6 +58,10 @@
       .${HIGHLIGHT_CLASS} {
         outline: 2px solid #ff6a00 !important;
         outline-offset: 2px !important;
+        cursor: crosshair !important;
+      }
+      .${SELECTED_CLASS} {
+        box-shadow: 0 0 0 2px #1f8fff inset, 0 0 0 2px #1f8fff;
         cursor: crosshair !important;
       }
       #${OVERLAY_ID} {
@@ -81,8 +87,8 @@
     }
     overlay = document.createElement("div");
     overlay.id = OVERLAY_ID;
-    overlay.textContent = i18n.t("overlay.select_prompt");
     document.body.appendChild(overlay);
+    updateOverlay();
   }
 
   function removeOverlay() {
@@ -92,11 +98,48 @@
     overlay = null;
   }
 
+  function updateOverlay() {
+    if (!overlay) {
+      return;
+    }
+    const prompt = i18n.t("overlay.select_prompt");
+    const count = selectedTargets.length;
+    if (count > 0) {
+      const selectedText = i18n.t("overlay.selected_count", { count });
+      overlay.textContent = `${prompt} | ${selectedText}`;
+      return;
+    }
+    overlay.textContent = prompt;
+  }
+
   function clearHighlight() {
     if (lastHighlighted) {
       lastHighlighted.classList.remove(HIGHLIGHT_CLASS);
       lastHighlighted = null;
     }
+  }
+
+  function clearSelectedTargets() {
+    selectedTargets.forEach((target) => {
+      target.classList.remove(SELECTED_CLASS);
+    });
+    selectedTargets = [];
+    updateOverlay();
+  }
+
+  function toggleSelectedTarget(target) {
+    if (!target) {
+      return;
+    }
+    const index = selectedTargets.indexOf(target);
+    if (index === -1) {
+      selectedTargets.push(target);
+      target.classList.add(SELECTED_CLASS);
+    } else {
+      selectedTargets.splice(index, 1);
+      target.classList.remove(SELECTED_CLASS);
+    }
+    updateOverlay();
   }
 
   function highlightElement(target) {
@@ -120,6 +163,7 @@
     exportFormat = format === "markdown" ? "markdown" : format === "png" ? "png" : "pdf";
     enhancedImageLoading = Boolean(enhancedImages);
     selecting = true;
+    selectedTargets = [];
     ensureStyleTag();
     createOverlay();
 
@@ -137,6 +181,7 @@
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("keydown", onKeyDown, true);
     clearHighlight();
+    clearSelectedTargets();
     removeOverlay();
   }
 
@@ -163,15 +208,13 @@
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
+    if (event.ctrlKey || event.metaKey) {
+      toggleSelectedTarget(target);
+      return;
+    }
 
     stopSelection();
-    if (exportFormat === "markdown") {
-      exportElementToMarkdown(target);
-    } else if (exportFormat === "png") {
-      exportElementToPng(target);
-    } else {
-      exportElementToPdf(target);
-    }
+    exportTargets([target]);
   }
 
   function onKeyDown(event) {
@@ -179,7 +222,17 @@
       return;
     }
     if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
       stopSelection();
+      return;
+    }
+    if (event.key === "Enter" && selectedTargets.length > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      const targets = selectedTargets.slice();
+      stopSelection();
+      exportTargets(targets);
     }
   }
 
@@ -667,7 +720,35 @@
     });
   }
 
-  async function exportElementToPng(target) {
+  function exportTargets(targets) {
+    if (!targets || targets.length === 0) {
+      return;
+    }
+    if (exportFormat === "markdown") {
+      exportElementsToMarkdown(targets);
+    } else if (exportFormat === "png") {
+      exportElementsToPng(targets);
+    } else {
+      exportElementsToPdf(targets);
+    }
+  }
+
+  function buildPngFilename(index, total) {
+    const base = sanitizeFilename(document.title);
+    if (total > 1) {
+      return `${base}-${index + 1}.png`;
+    }
+    return `${base}.png`;
+  }
+
+  async function exportElementsToPng(targets) {
+    for (let i = 0; i < targets.length; i += 1) {
+      const filename = buildPngFilename(i, targets.length);
+      await exportElementToPng(targets[i], filename);
+    }
+  }
+
+  async function exportElementToPng(target, filename) {
     try {
       target.scrollIntoView({ block: "center", inline: "nearest" });
     } catch (error) {
@@ -731,8 +812,8 @@
       return;
     }
 
-    const filename = `${sanitizeFilename(document.title)}.png`;
-    downloadBlob(blob, filename);
+    const resolvedFilename = filename || `${sanitizeFilename(document.title)}.png`;
+    downloadBlob(blob, resolvedFilename);
   }
 
   function syncFormValue(source, target) {
@@ -826,6 +907,27 @@
     }
   }
 
+  function createTargetsWrapper(targets, keepStyles, enhancedImages) {
+    const wrapper = document.createElement("div");
+    wrapper.style.display = "flex";
+    wrapper.style.flexDirection = "column";
+    wrapper.style.gap = "16px";
+    wrapper.style.alignItems = "stretch";
+
+    targets.forEach((target) => {
+      const clone = target.cloneNode(true);
+      prepareClone(target, clone, {
+        inlineStyles: keepStyles,
+        stripStyles: !keepStyles,
+        syncImages: true,
+        enhancedImages
+      });
+      wrapper.appendChild(clone);
+    });
+
+    return wrapper;
+  }
+
   function buildPrintPayload(target, keepStyles, enhancedImages) {
     const clone = target.cloneNode(true);
     prepareClone(target, clone, {
@@ -835,6 +937,16 @@
       enhancedImages
     });
 
+    const baseHref = document.baseURI || location.href;
+    const bodyStyle = keepStyles
+      ? "margin:0;padding:16px;background:#ffffff;"
+      : "margin:0;padding:16px;font-family:Arial, sans-serif;background:#ffffff;";
+
+    return { clone, baseHref, bodyStyle };
+  }
+
+  function buildPrintPayloadForTargets(targets, keepStyles, enhancedImages) {
+    const clone = createTargetsWrapper(targets, keepStyles, enhancedImages);
     const baseHref = document.baseURI || location.href;
     const bodyStyle = keepStyles
       ? "margin:0;padding:16px;background:#ffffff;"
@@ -983,6 +1095,64 @@
     ]);
   }
 
+  async function printTargetsInPage(targets, keepStyles, enhancedImages) {
+    cleanupPrintArtifacts();
+
+    const wrapper = createTargetsWrapper(targets, keepStyles, enhancedImages);
+
+    const container = document.createElement("div");
+    container.id = PRINT_CONTAINER_ID;
+    container.style.position = "fixed";
+    container.style.inset = "0";
+    container.style.overflow = "auto";
+    container.style.background = "#ffffff";
+    container.style.padding = "16px";
+    container.style.zIndex = "2147483647";
+    container.appendChild(wrapper);
+
+    const style = document.createElement("style");
+    style.id = PRINT_STYLE_ID;
+    const resetRules = keepStyles
+      ? ""
+      : `
+        #${PRINT_CONTAINER_ID},
+        #${PRINT_CONTAINER_ID} * {
+          all: revert;
+        }
+        #${PRINT_CONTAINER_ID} {
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          color: #111111;
+        }
+      `;
+
+    style.textContent = `
+      ${resetRules}
+      @media print {
+        body > *:not(#${PRINT_CONTAINER_ID}) {
+          display: none !important;
+        }
+        #${PRINT_CONTAINER_ID} {
+          position: static !important;
+          inset: auto !important;
+          overflow: visible !important;
+          padding: 0 !important;
+        }
+      }
+    `;
+
+    (document.head || document.documentElement).appendChild(style);
+    document.body.appendChild(container);
+
+    const cleanup = () => {
+      cleanupPrintArtifacts();
+    };
+
+    window.addEventListener("afterprint", cleanup, { once: true });
+    await waitForPrintAssets(container, enhancedImages);
+    window.print();
+  }
+
   async function printInPage(target, keepStyles, enhancedImages) {
     cleanupPrintArtifacts();
 
@@ -1047,6 +1217,26 @@
     window.print();
   }
 
+  async function exportElementsToPdf(targets) {
+    if (!targets || targets.length === 0) {
+      return;
+    }
+    if (targets.length === 1) {
+      await exportElementToPdf(targets[0]);
+      return;
+    }
+
+    try {
+      await printTargetsInPage(targets, preserveStyles, enhancedImageLoading);
+    } catch (error) {
+      const payload = buildPrintPayloadForTargets(targets, preserveStyles, enhancedImageLoading);
+      const opened = openPrintWindow(payload, enhancedImageLoading);
+      if (!opened) {
+        alert(i18n.t("alert.print_blocked"));
+      }
+    }
+  }
+
   async function exportElementToPdf(target) {
     try {
       await printInPage(target, preserveStyles, enhancedImageLoading);
@@ -1057,6 +1247,24 @@
         alert(i18n.t("alert.print_blocked"));
       }
     }
+  }
+
+  function exportElementsToMarkdown(targets) {
+    if (!targets || targets.length === 0) {
+      return;
+    }
+    if (targets.length === 1) {
+      exportElementToMarkdown(targets[0]);
+      return;
+    }
+
+    const sections = targets
+      .map((target) => elementToMarkdown(target))
+      .map((content) => content.trim())
+      .filter(Boolean);
+    const markdown = sections.join("\n\n---\n\n");
+    const filename = `${sanitizeFilename(document.title)}.md`;
+    downloadMarkdown(markdown, filename);
   }
 
   function exportElementToMarkdown(target) {
