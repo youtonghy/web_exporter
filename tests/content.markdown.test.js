@@ -264,6 +264,38 @@ function createInlineMath(latex, visibleText) {
   return { root, visibleLeaf };
 }
 
+function createGeminiInlineMath(latex, visibleText) {
+  const visibleLeaf = el("span", { class: "mord" }, [text(visibleText)]);
+  const base = el("span", { class: "base" }, [visibleLeaf]);
+  const html = el("span", { class: "katex-html", "aria-hidden": "true" }, [base]);
+  const katex = el("span", { class: "katex" }, [html]);
+  const root = el("span", { class: "math-inline", "data-math": latex }, [katex]);
+  return { root, visibleLeaf };
+}
+
+function createGeminiMatrixMath(latex, values) {
+  const leftBracket = el("img", { class: "katex-svg", src: "data:image/svg+xml;utf8,<svg></svg>" });
+  const rightBracket = el("img", { class: "katex-svg", src: "data:image/svg+xml;utf8,<svg></svg>" });
+  const column = el(
+    "span",
+    { class: "mtable" },
+    values.map((value) => el("span", { class: "mord" }, [text(value)]))
+  );
+  const html = el("span", { class: "katex-html", "aria-hidden": "true" }, [leftBracket, column, rightBracket]);
+  const katex = el("span", { class: "katex" }, [html]);
+  const root = el("span", { class: "math-inline", "data-math": latex }, [katex]);
+  return { root, visibleLeaf: column.childNodes[0] };
+}
+
+function createFallbackMathWithoutLatex(visibleText) {
+  const leftBracket = el("img", { class: "katex-svg", src: "data:image/svg+xml;utf8,<svg></svg>" });
+  const rightBracket = el("img", { class: "katex-svg", src: "data:image/svg+xml;utf8,<svg></svg>" });
+  const visibleLeaf = el("span", { class: "mord" }, [text(visibleText)]);
+  const html = el("span", { class: "katex-html", "aria-hidden": "true" }, [leftBracket, visibleLeaf, rightBracket]);
+  const root = el("span", { class: "katex" }, [html]);
+  return { root, visibleLeaf };
+}
+
 function createPlainPreBlock() {
   const lineBreak = el("br", {}, []);
   const code = el("code", {}, [
@@ -361,6 +393,34 @@ test("preserves inline math inside headings and list items", () => {
   );
 });
 
+test("extracts Gemini data-math wrappers instead of flattening visible text", () => {
+  const hooks = loadContentHooks();
+  const formula = createGeminiInlineMath("P_2", "P2");
+  const root = el("p", {}, [text("空间 "), formula.root, text(" 很重要")]);
+
+  assert.equal(hooks.resolveSelectableTarget(formula.visibleLeaf), formula.root);
+  assert.equal(hooks.elementToMarkdown(root), "空间 $P_2$ 很重要");
+});
+
+test("exports Gemini matrix formulas from data-math without leaking KaTeX SVG images", () => {
+  const hooks = loadContentHooks();
+  const matrix = createGeminiMatrixMath("\\begin{pmatrix} a \\\\ b \\\\ c \\end{pmatrix}", ["a", "b", "c"]);
+  const root = el("p", {}, [text("向量 "), matrix.root]);
+  const markdown = hooks.elementToMarkdown(root);
+
+  assert.equal(hooks.resolveSelectableTarget(matrix.visibleLeaf), matrix.root);
+  assert.equal(markdown, "向量 $\\begin{pmatrix} a \\\\ b \\\\ c \\end{pmatrix}$");
+  assert.ok(!markdown.includes("data:image/svg+xml"));
+  assert.ok(!markdown.includes("![]("));
+});
+
+test("falls back to readable text when KaTeX source is missing", () => {
+  const hooks = loadContentHooks();
+  const formula = createFallbackMathWithoutLatex("abc");
+
+  assert.equal(hooks.elementToMarkdown(formula.root), "abc");
+});
+
 test("preserves line breaks in plain preformatted code blocks", () => {
   const hooks = loadContentHooks();
   const block = createPlainPreBlock();
@@ -379,5 +439,22 @@ test("exports CodeMirror code blocks as fenced code with detected language", () 
   assert.equal(
     hooks.elementToMarkdown(hooks.resolveSelectableTarget(block.codeLeaf)),
     "```python\nfor i in range(n):\n    for j in range(n):\n        print(i, j)\n```"
+  );
+});
+
+test("treats custom container elements with block children as block wrappers", () => {
+  const hooks = loadContentHooks();
+  const formula = createGeminiInlineMath("P_2", "P2");
+  const root = el("message-content", {}, [
+    el("p", {}, [text("第一段")]),
+    el("h3", {}, [text("标题 "), formula.root]),
+    el("ul", {}, [el("li", {}, [text("列表项")])]),
+    el("hr", {}, []),
+    el("p", {}, [text("第二段")])
+  ]);
+
+  assert.equal(
+    hooks.elementToMarkdown(root),
+    "第一段\n\n### 标题 $P_2$\n\n- 列表项\n\n---\n\n第二段"
   );
 });

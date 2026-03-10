@@ -17,6 +17,7 @@
     "复制",
     "运行"
   ]);
+  const MATH_SOURCE_ATTRIBUTES = ["data-math", "data-tex", "data-latex", "alttext", "data-formula"];
   const BLOCK_TAGS = new Set([
     "address",
     "article",
@@ -386,6 +387,31 @@
     return tag === "script" || tag === "style" || tag === "noscript";
   }
 
+  function isCustomElementTag(tag) {
+    return typeof tag === "string" && tag.includes("-");
+  }
+
+  function hasBlockLikeChildren(node) {
+    if (!(node instanceof Element)) {
+      return false;
+    }
+    return Array.from(node.childNodes).some((child) => {
+      if (!(child instanceof Element)) {
+        return false;
+      }
+      const tag = child.tagName.toLowerCase();
+      return BLOCK_TAGS.has(tag) || isCustomElementTag(tag);
+    });
+  }
+
+  function shouldTreatAsBlockContainer(node) {
+    if (!(node instanceof Element)) {
+      return false;
+    }
+    const tag = node.tagName.toLowerCase();
+    return isCustomElementTag(tag) || hasBlockLikeChildren(node);
+  }
+
   function convertInlineChildren(node, context) {
     return Array.from(node.childNodes)
       .map((child) => convertInlineNode(child, context))
@@ -691,9 +717,32 @@
     return null;
   }
 
+  function getMathSourceNode(node) {
+    if (!(node instanceof Element)) {
+      return null;
+    }
+
+    let current = node;
+    while (current instanceof Element) {
+      if (
+        current.getAttribute("data-math") &&
+        (current.classList.contains("math-inline") || current.classList.contains("math-display"))
+      ) {
+        return current;
+      }
+      current = current.parentNode instanceof Element ? current.parentNode : null;
+    }
+    return null;
+  }
+
   function getMathRoot(node) {
     if (!(node instanceof Element)) {
       return null;
+    }
+
+    const sourcedRoot = getMathSourceNode(node);
+    if (sourcedRoot) {
+      return sourcedRoot;
     }
 
     const displayRoot = node.closest(".katex-display");
@@ -769,19 +818,18 @@
       }
     }
 
-    const directAttributes = ["data-tex", "data-latex", "alttext", "data-formula"];
-    for (const name of directAttributes) {
+    for (const name of MATH_SOURCE_ATTRIBUTES) {
       const value = getMathSourceFromAttribute(node, name);
       if (value) {
         return value;
       }
     }
 
-    const attributeSelectors = directAttributes.map((name) => `[${name}]`).join(", ");
+    const attributeSelectors = MATH_SOURCE_ATTRIBUTES.map((name) => `[${name}]`).join(", ");
     if (attributeSelectors) {
       const sourceNode = node.querySelector(attributeSelectors);
       if (sourceNode instanceof Element) {
-        for (const name of directAttributes) {
+        for (const name of MATH_SOURCE_ATTRIBUTES) {
           const value = getMathSourceFromAttribute(sourceNode, name);
           if (value) {
             return value;
@@ -803,6 +851,9 @@
     }
 
     if (node.classList.contains("katex-display")) {
+      return true;
+    }
+    if (node.classList.contains("math-display")) {
       return true;
     }
 
@@ -847,6 +898,17 @@
     return formatMarkdownMath(latex, detectMathDisplayMode(mathRoot));
   }
 
+  function isMathRenderingImage(node) {
+    if (!(node instanceof Element) || node.tagName.toLowerCase() !== "img") {
+      return false;
+    }
+    if (node.classList.contains("katex-svg")) {
+      return true;
+    }
+    const src = node.getAttribute("src") || "";
+    return Boolean(getMathRoot(node)) && /^data:image\/svg\+xml/i.test(src);
+  }
+
   function convertInlineNode(node, context) {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = normalizeWhitespace(node.nodeValue || "");
@@ -887,6 +949,9 @@
       return `[${text || href}](${href})`;
     }
     if (tag === "img") {
+      if (isMathRenderingImage(node)) {
+        return "";
+      }
       const alt = escapeMarkdownText(node.getAttribute("alt") || "");
       const src = node.getAttribute("src") || "";
       if (!src) {
@@ -1060,6 +1125,9 @@
       return "\n";
     }
     if (BLOCK_TAGS.has(tag)) {
+      return convertBlockChildren(node, context);
+    }
+    if (shouldTreatAsBlockContainer(node)) {
       return convertBlockChildren(node, context);
     }
     return convertInlineChildren(node, context).trim();
