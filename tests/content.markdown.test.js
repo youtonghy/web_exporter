@@ -264,6 +264,59 @@ function createInlineMath(latex, visibleText) {
   return { root, visibleLeaf };
 }
 
+function createPlainPreBlock() {
+  const lineBreak = el("br", {}, []);
+  const code = el("code", {}, [
+    text("for i in range(n):"),
+    lineBreak,
+    text("    print(i)")
+  ]);
+  return { root: el("pre", {}, [code]), lineBreak };
+}
+
+function createCodeMirrorBlock() {
+  const codeLeaf = el("span", { class: "tok" }, [text("range")]);
+  const content = el("div", { class: "cm-content q9tKkq_readonly" }, [
+    el("span", { class: "tok-keyword" }, [text("for")]),
+    text(" "),
+    el("span", { class: "tok-variable" }, [text("i")]),
+    text(" "),
+    el("span", { class: "tok-keyword" }, [text("in")]),
+    text(" "),
+    codeLeaf,
+    text("(n):"),
+    el("br", {}, []),
+    text("    "),
+    el("span", { class: "tok-keyword" }, [text("for")]),
+    text(" "),
+    el("span", { class: "tok-variable" }, [text("j")]),
+    text(" "),
+    el("span", { class: "tok-keyword" }, [text("in")]),
+    text(" "),
+    el("span", { class: "tok" }, [text("range")]),
+    text("(n):"),
+    el("br", {}, []),
+    text("        "),
+    el("span", { class: "tok" }, [text("print")]),
+    text("(i, j)")
+  ]);
+  const editor = el("div", { class: "cm-editor" }, [
+    el("div", { class: "cm-scroller" }, [content])
+  ]);
+  const toolbar = el("div", { class: "toolbar" }, [
+    el("div", { class: "language-label" }, [text("Python")]),
+    el("div", { class: "actions" }, [
+      el("button", { "aria-label": "复制" }, [text("复制")]),
+      el("button", { "aria-label": "运行代码" }, [text("运行")])
+    ])
+  ]);
+  const root = el("pre", {}, [
+    toolbar,
+    el("div", { class: "viewer-shell" }, [editor])
+  ]);
+  return { root, editor, codeLeaf };
+}
+
 test("resolves clicks inside KaTeX display math to the display root", () => {
   const hooks = loadContentHooks();
   const formula = createDisplayMath("A = [4, 7, 1, 9, 3]", "A");
@@ -305,5 +358,26 @@ test("preserves inline math inside headings and list items", () => {
   assert.equal(
     hooks.elementToMarkdown(root),
     "## 第三步：计算操作次数 $g(n)$\n\n- $c$ = 每次比较花费的时间"
+  );
+});
+
+test("preserves line breaks in plain preformatted code blocks", () => {
+  const hooks = loadContentHooks();
+  const block = createPlainPreBlock();
+
+  assert.equal(
+    hooks.elementToMarkdown(block.root),
+    "```\nfor i in range(n):\n    print(i)\n```"
+  );
+});
+
+test("exports CodeMirror code blocks as fenced code with detected language", () => {
+  const hooks = loadContentHooks();
+  const block = createCodeMirrorBlock();
+
+  assert.equal(hooks.resolveSelectableTarget(block.codeLeaf), block.root);
+  assert.equal(
+    hooks.elementToMarkdown(hooks.resolveSelectableTarget(block.codeLeaf)),
+    "```python\nfor i in range(n):\n    for j in range(n):\n        print(i, j)\n```"
   );
 });

@@ -6,6 +6,17 @@
   const PRINT_STYLE_ID = "__web_exporter_print_style__";
   const IMAGE_LOAD_TIMEOUT_MS = 2000;
   const ENHANCED_IMAGE_LOAD_TIMEOUT_MS = 8000;
+  const CODE_BLOCK_CONTROL_LABELS = new Set([
+    "copy",
+    "copied",
+    "run",
+    "edit",
+    "preview",
+    "expand",
+    "collapse",
+    "复制",
+    "运行"
+  ]);
   const BLOCK_TAGS = new Set([
     "address",
     "article",
@@ -115,6 +126,10 @@
   function resolveSelectableTarget(target) {
     if (!(target instanceof Element)) {
       return target;
+    }
+    const codeBlockRoot = getCodeBlockRoot(target);
+    if (codeBlockRoot) {
+      return codeBlockRoot;
     }
     const mathRoot = getMathRoot(target);
     return mathRoot || target;
@@ -395,6 +410,253 @@
     const selected = node.querySelector("option:checked");
     const text = selected ? selected.textContent : node.textContent;
     return escapeMarkdownText(normalizeWhitespace(text || ""));
+  }
+
+  function hasClass(node, name) {
+    return node instanceof Element && node.classList && node.classList.contains(name);
+  }
+
+  function isCodeBlockRoot(node) {
+    return node instanceof Element && getCodeBlockRoot(node) === node;
+  }
+
+  function getCodeBlockRoot(node) {
+    if (!(node instanceof Element)) {
+      return null;
+    }
+
+    const pre = node.closest("pre");
+    if (pre) {
+      return pre;
+    }
+
+    const editor = node.closest(".cm-editor");
+    if (editor) {
+      return editor;
+    }
+
+    const viewer = node.closest("#code-block-viewer");
+    if (viewer) {
+      return viewer;
+    }
+
+    const content = node.closest(".cm-content");
+    return content instanceof Element ? content : null;
+  }
+
+  function nodeContains(root, node) {
+    if (!(root instanceof Element) || !node) {
+      return false;
+    }
+    let current = node;
+    while (current) {
+      if (current === root) {
+        return true;
+      }
+      current = current.parentNode;
+    }
+    return false;
+  }
+
+  function getCodeContentRoot(node) {
+    if (!(node instanceof Element)) {
+      return null;
+    }
+    if (hasClass(node, "cm-content")) {
+      return node;
+    }
+    const tag = node.tagName.toLowerCase();
+    if (tag === "code") {
+      return node;
+    }
+    const cmContent = node.querySelector(".cm-content");
+    if (cmContent instanceof Element) {
+      return cmContent;
+    }
+    const code = node.querySelector("code");
+    if (code instanceof Element) {
+      return code;
+    }
+    return node;
+  }
+
+  function isCodeTextLineContainer(node) {
+    if (!(node instanceof Element)) {
+      return false;
+    }
+    const tag = node.tagName.toLowerCase();
+    return hasClass(node, "cm-line") || tag === "div" || tag === "p";
+  }
+
+  function extractCodeText(node, isRoot = false) {
+    if (!node) {
+      return "";
+    }
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.nodeValue || "";
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    const tag = node.tagName.toLowerCase();
+    if (isIgnorableTag(tag)) {
+      return "";
+    }
+    if (tag === "br") {
+      return "\n";
+    }
+
+    let content = "";
+    node.childNodes.forEach((child) => {
+      content += extractCodeText(child);
+    });
+
+    if (!isRoot && isCodeTextLineContainer(node) && content && !content.endsWith("\n")) {
+      content += "\n";
+    }
+
+    return content;
+  }
+
+  function normalizeCodeBlockContent(text) {
+    return (text || "").replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\n+$/, "");
+  }
+
+  function getLanguageFromClassName(node) {
+    if (!(node instanceof Element)) {
+      return "";
+    }
+    const className = node.getAttribute("class") || "";
+    const match = className.match(/(?:^|\s)(?:lang|language)-([A-Za-z0-9_+#.-]+)(?:\s|$)/i);
+    return match ? match[1] : "";
+  }
+
+  function normalizeCodeLanguage(value) {
+    const normalized = (value || "").trim().toLowerCase();
+    if (!normalized) {
+      return "";
+    }
+    const collapsed = normalized.replace(/\s+/g, " ");
+    const aliases = {
+      plaintext: "text",
+      "plain text": "text",
+      text: "text",
+      py: "python",
+      python: "python",
+      js: "javascript",
+      javascript: "javascript",
+      ts: "typescript",
+      typescript: "typescript",
+      shell: "bash",
+      sh: "bash",
+      bash: "bash",
+      zsh: "bash",
+      console: "bash",
+      csharp: "csharp",
+      "c#": "csharp",
+      "c++": "cpp"
+    };
+    if (aliases[collapsed]) {
+      return aliases[collapsed];
+    }
+    return collapsed.replace(/\s+/g, "");
+  }
+
+  function isPotentialLanguageLabel(value) {
+    const normalized = normalizeWhitespace(value || "").trim();
+    if (!normalized || normalized.length > 30) {
+      return false;
+    }
+    if (!/^[A-Za-z0-9+#._ -]+$/.test(normalized)) {
+      return false;
+    }
+    return !CODE_BLOCK_CONTROL_LABELS.has(normalized.toLowerCase());
+  }
+
+  function findCodeBlockLanguageLabel(node, contentRoot) {
+    if (!(node instanceof Element) || node === contentRoot) {
+      return "";
+    }
+    const tag = node.tagName.toLowerCase();
+    if (tag === "button" || tag === "svg" || tag === "use") {
+      return "";
+    }
+
+    const directText = normalizeWhitespace(node.textContent || "").trim();
+    if (isPotentialLanguageLabel(directText) && !node.querySelector("button")) {
+      return directText;
+    }
+
+    for (const child of Array.from(node.childNodes)) {
+      if (!(child instanceof Element)) {
+        continue;
+      }
+      if (child === contentRoot || nodeContains(contentRoot, child)) {
+        continue;
+      }
+      const nested = findCodeBlockLanguageLabel(child, contentRoot);
+      if (nested) {
+        return nested;
+      }
+    }
+
+    return "";
+  }
+
+  function getCodeBlockLanguage(node, contentRoot) {
+    if (!(node instanceof Element)) {
+      return "";
+    }
+
+    const directAttributes = ["data-language", "data-lang"];
+    for (const current of [node, contentRoot]) {
+      if (!(current instanceof Element)) {
+        continue;
+      }
+      for (const name of directAttributes) {
+        const value = normalizeCodeLanguage(current.getAttribute(name) || "");
+        if (value) {
+          return value;
+        }
+      }
+      const classValue = normalizeCodeLanguage(getLanguageFromClassName(current));
+      if (classValue) {
+        return classValue;
+      }
+    }
+
+    const labeledNode = node.querySelector("[data-language], [data-lang], [class]");
+    if (labeledNode instanceof Element) {
+      for (const name of directAttributes) {
+        const value = normalizeCodeLanguage(labeledNode.getAttribute(name) || "");
+        if (value) {
+          return value;
+        }
+      }
+      const classValue = normalizeCodeLanguage(getLanguageFromClassName(labeledNode));
+      if (classValue) {
+        return classValue;
+      }
+    }
+
+    const label = findCodeBlockLanguageLabel(node, contentRoot);
+    return normalizeCodeLanguage(label);
+  }
+
+  function formatCodeBlock(node) {
+    const codeRoot = getCodeBlockRoot(node);
+    if (!codeRoot || codeRoot !== node) {
+      return "";
+    }
+    const contentRoot = getCodeContentRoot(codeRoot);
+    const content = normalizeCodeBlockContent(extractCodeText(contentRoot, true));
+    if (!content) {
+      return "";
+    }
+    const language = getCodeBlockLanguage(codeRoot, contentRoot);
+    const fence = language ? `\`\`\`${language}` : "```";
+    return `${fence}\n${content}\n\`\`\``;
   }
 
   function isMathScriptNode(node) {
@@ -751,6 +1013,10 @@
     }
     if (node.nodeType !== Node.ELEMENT_NODE) {
       return "";
+    }
+    const codeBlock = formatCodeBlock(node);
+    if (codeBlock) {
+      return codeBlock;
     }
     const math = convertMathNode(node);
     if (math) {
@@ -1286,10 +1552,14 @@
   if (globalThis.__WEB_EXPORTER_TEST_HOOKS__) {
     globalThis.__WEB_EXPORTER_TEST_HOOKS__ = {
       convertMathNode,
+      formatCodeBlock,
       detectMathDisplayMode,
       elementToMarkdown,
+      getCodeBlockRoot,
+      getCodeContentRoot,
       getMathRoot,
       isMathRoot,
+      isCodeBlockRoot,
       resolveSelectableTarget
     };
   }
