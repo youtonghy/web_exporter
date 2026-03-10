@@ -112,6 +112,14 @@
     return target && (target.id === OVERLAY_ID || target.closest(`#${OVERLAY_ID}`));
   }
 
+  function resolveSelectableTarget(target) {
+    if (!(target instanceof Element)) {
+      return target;
+    }
+    const mathRoot = getMathRoot(target);
+    return mathRoot || target;
+  }
+
   function startSelection(keepStyles, format, enhancedImages) {
     if (selecting) {
       return;
@@ -144,7 +152,7 @@
     if (!selecting) {
       return;
     }
-    const target = event.target;
+    const target = resolveSelectableTarget(event.target);
     if (!target || isOverlayTarget(target)) {
       return;
     }
@@ -155,7 +163,7 @@
     if (!selecting) {
       return;
     }
-    const target = event.target;
+    const target = resolveSelectableTarget(event.target);
     if (!target || isOverlayTarget(target)) {
       return;
     }
@@ -421,27 +429,35 @@
     return null;
   }
 
-  function isMathRoot(node) {
+  function getMathRoot(node) {
     if (!(node instanceof Element)) {
-      return false;
+      return null;
     }
-    if (node.closest(".katex") && !node.classList.contains("katex") && !node.classList.contains("katex-display")) {
-      return false;
+
+    const displayRoot = node.closest(".katex-display");
+    if (displayRoot) {
+      return displayRoot;
     }
+
+    const inlineRoot = node.closest(".katex");
+    if (inlineRoot) {
+      return inlineRoot;
+    }
+
     const tag = node.tagName.toLowerCase();
-    if (tag === "script") {
-      return isMathScriptNode(node);
+    if (tag === "script" && isMathScriptNode(node)) {
+      return node;
     }
     if (tag === "mjx-container" || tag === "math") {
-      return true;
+      return node;
     }
-    if (node.classList.contains("katex-display")) {
-      return true;
-    }
-    if (node.classList.contains("katex")) {
-      return !node.closest(".katex-display .katex");
-    }
-    return false;
+
+    const mathContainer = node.closest("mjx-container, math");
+    return mathContainer instanceof Element ? mathContainer : null;
+  }
+
+  function isMathRoot(node) {
+    return node instanceof Element && getMathRoot(node) === node;
   }
 
   function stripMathDelimiters(text) {
@@ -558,14 +574,15 @@
   }
 
   function convertMathNode(node) {
-    if (!isMathRoot(node)) {
+    const mathRoot = getMathRoot(node);
+    if (!mathRoot || mathRoot !== node) {
       return "";
     }
-    const latex = extractLatex(node);
+    const latex = extractLatex(mathRoot);
     if (!latex) {
       return "";
     }
-    return formatMarkdownMath(latex, detectMathDisplayMode(node));
+    return formatMarkdownMath(latex, detectMathDisplayMode(mathRoot));
   }
 
   function convertInlineNode(node, context) {
@@ -783,7 +800,7 @@
   }
 
   function elementToMarkdown(root) {
-    const content = convertBlockChildren(root, { listDepth: 0 });
+    const content = convertNode(root, { listDepth: 0 });
     return normalizeMarkdown(content);
   }
 
@@ -1264,6 +1281,17 @@
     const markdown = elementToMarkdown(target);
     const filename = `${sanitizeFilename(document.title)}.md`;
     downloadMarkdown(markdown, filename);
+  }
+
+  if (globalThis.__WEB_EXPORTER_TEST_HOOKS__) {
+    globalThis.__WEB_EXPORTER_TEST_HOOKS__ = {
+      convertMathNode,
+      detectMathDisplayMode,
+      elementToMarkdown,
+      getMathRoot,
+      isMathRoot,
+      resolveSelectableTarget
+    };
   }
 
   if (api && api.runtime && api.runtime.onMessage) {
