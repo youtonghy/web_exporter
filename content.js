@@ -389,6 +389,185 @@
     return escapeMarkdownText(normalizeWhitespace(text || ""));
   }
 
+  function isMathScriptNode(node) {
+    if (!(node instanceof HTMLScriptElement)) {
+      return false;
+    }
+    const type = (node.getAttribute("type") || "").toLowerCase();
+    return type.startsWith("math/tex");
+  }
+
+  function isMathAnnotationEncoding(value) {
+    return /(?:^|\/)(?:x-)?(?:tex|latex)$/i.test((value || "").trim());
+  }
+
+  function getMathAnnotation(node) {
+    if (!(node instanceof Element)) {
+      return null;
+    }
+    if (node.tagName && node.tagName.toLowerCase() === "annotation") {
+      const encoding = node.getAttribute("encoding") || "";
+      if (isMathAnnotationEncoding(encoding)) {
+        return node;
+      }
+    }
+    const annotations = node.querySelectorAll("annotation[encoding]");
+    for (const annotation of annotations) {
+      const encoding = annotation.getAttribute("encoding") || "";
+      if (isMathAnnotationEncoding(encoding)) {
+        return annotation;
+      }
+    }
+    return null;
+  }
+
+  function isMathRoot(node) {
+    if (!(node instanceof Element)) {
+      return false;
+    }
+    if (node.closest(".katex") && !node.classList.contains("katex") && !node.classList.contains("katex-display")) {
+      return false;
+    }
+    const tag = node.tagName.toLowerCase();
+    if (tag === "script") {
+      return isMathScriptNode(node);
+    }
+    if (tag === "mjx-container" || tag === "math") {
+      return true;
+    }
+    if (node.classList.contains("katex-display")) {
+      return true;
+    }
+    if (node.classList.contains("katex")) {
+      return !node.closest(".katex-display .katex");
+    }
+    return false;
+  }
+
+  function stripMathDelimiters(text) {
+    const trimmed = (text || "").trim();
+    if (!trimmed) {
+      return "";
+    }
+    const dollarBlockMatch = trimmed.match(/^\$\$([\s\S]*?)\$\$$/);
+    if (dollarBlockMatch) {
+      return dollarBlockMatch[1].trim();
+    }
+    const dollarInlineMatch = trimmed.match(/^\$([\s\S]*?)\$$/);
+    if (dollarInlineMatch) {
+      return dollarInlineMatch[1].trim();
+    }
+    const bracketBlockMatch = trimmed.match(/^\\\[([\s\S]*?)\\\]$/);
+    if (bracketBlockMatch) {
+      return bracketBlockMatch[1].trim();
+    }
+    const parenInlineMatch = trimmed.match(/^\\\(([\s\S]*?)\\\)$/);
+    if (parenInlineMatch) {
+      return parenInlineMatch[1].trim();
+    }
+    return trimmed;
+  }
+
+  function getMathSourceFromAttribute(node, name) {
+    if (!(node instanceof Element)) {
+      return "";
+    }
+    return stripMathDelimiters(node.getAttribute(name) || "");
+  }
+
+  function extractLatex(node) {
+    if (isMathScriptNode(node)) {
+      return stripMathDelimiters(node.textContent || "");
+    }
+    if (!(node instanceof Element)) {
+      return "";
+    }
+
+    const annotation = getMathAnnotation(node);
+    if (annotation) {
+      const encoding = annotation.getAttribute("encoding") || "";
+      if (isMathAnnotationEncoding(encoding)) {
+        return stripMathDelimiters(annotation.textContent || "");
+      }
+    }
+
+    const directAttributes = ["data-tex", "data-latex", "alttext", "data-formula"];
+    for (const name of directAttributes) {
+      const value = getMathSourceFromAttribute(node, name);
+      if (value) {
+        return value;
+      }
+    }
+
+    const attributeSelectors = directAttributes.map((name) => `[${name}]`).join(", ");
+    if (attributeSelectors) {
+      const sourceNode = node.querySelector(attributeSelectors);
+      if (sourceNode instanceof Element) {
+        for (const name of directAttributes) {
+          const value = getMathSourceFromAttribute(sourceNode, name);
+          if (value) {
+            return value;
+          }
+        }
+      }
+    }
+
+    return "";
+  }
+
+  function detectMathDisplayMode(node) {
+    if (isMathScriptNode(node)) {
+      const type = (node.getAttribute("type") || "").toLowerCase();
+      return type.includes("mode=display");
+    }
+    if (!(node instanceof Element)) {
+      return false;
+    }
+
+    if (node.classList.contains("katex-display")) {
+      return true;
+    }
+
+    const display = (node.getAttribute("display") || "").toLowerCase();
+    if (display === "block" || display === "true") {
+      return true;
+    }
+
+    const mode = (node.getAttribute("mode") || "").toLowerCase();
+    if (mode === "display") {
+      return true;
+    }
+
+    const role = (node.getAttribute("data-display") || "").toLowerCase();
+    if (role === "true" || role === "block") {
+      return true;
+    }
+
+    return false;
+  }
+
+  function formatMarkdownMath(latex, displayMode) {
+    const content = stripMathDelimiters(latex);
+    if (!content) {
+      return "";
+    }
+    if (displayMode) {
+      return `$$\n${content}\n$$`;
+    }
+    return `$${content}$`;
+  }
+
+  function convertMathNode(node) {
+    if (!isMathRoot(node)) {
+      return "";
+    }
+    const latex = extractLatex(node);
+    if (!latex) {
+      return "";
+    }
+    return formatMarkdownMath(latex, detectMathDisplayMode(node));
+  }
+
   function convertInlineNode(node, context) {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = normalizeWhitespace(node.nodeValue || "");
@@ -397,8 +576,12 @@
     if (node.nodeType !== Node.ELEMENT_NODE) {
       return "";
     }
+    const math = convertMathNode(node);
+    if (math) {
+      return math;
+    }
     const tag = node.tagName.toLowerCase();
-    if (isIgnorableTag(tag)) {
+    if (isIgnorableTag(tag) && !isMathScriptNode(node)) {
       return "";
     }
     if (tag === "br") {
@@ -460,6 +643,20 @@
     const inlineParts = [];
     node.childNodes.forEach((child) => {
       if (child.nodeType === Node.ELEMENT_NODE) {
+        if (isMathRoot(child) && detectMathDisplayMode(child)) {
+          if (inlineParts.length) {
+            const inlineText = inlineParts.join("").trim();
+            if (inlineText) {
+              blocks.push(inlineText);
+            }
+            inlineParts.length = 0;
+          }
+          const mathBlock = convertNode(child, context);
+          if (mathBlock) {
+            blocks.push(mathBlock);
+          }
+          return;
+        }
         const tag = child.tagName.toLowerCase();
         if (tag === "ul" || tag === "ol") {
           if (inlineParts.length) {
@@ -538,9 +735,13 @@
     if (node.nodeType !== Node.ELEMENT_NODE) {
       return "";
     }
+    const math = convertMathNode(node);
+    if (math) {
+      return math;
+    }
 
     const tag = node.tagName.toLowerCase();
-    if (isIgnorableTag(tag)) {
+    if (isIgnorableTag(tag) && !isMathScriptNode(node)) {
       return "";
     }
 
