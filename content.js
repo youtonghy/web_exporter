@@ -841,6 +841,218 @@
     return "";
   }
 
+  function normalizeKatexFallbackText(text) {
+    return (text || "")
+      .replace(/\u200b/g, "")
+      .replace(/\u2212/g, "-")
+      .replace(/\u2223/g, "|")
+      .replace(/\u2225/g, "||")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function extractKatexRawText(node) {
+    if (!node) {
+      return "";
+    }
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.nodeValue || "";
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    const tag = node.tagName.toLowerCase();
+    if (tag === "img") {
+      return "";
+    }
+    if (
+      node.classList.contains("arraycolsep") ||
+      node.classList.contains("pstrut") ||
+      node.classList.contains("vlist-s")
+    ) {
+      return "";
+    }
+    if (node.classList.contains("mspace")) {
+      return " ";
+    }
+
+    let result = "";
+    node.childNodes.forEach((child) => {
+      result += extractKatexRawText(child);
+    });
+    return result;
+  }
+
+  function getKatexHtmlRoot(node) {
+    if (!(node instanceof Element)) {
+      return null;
+    }
+    if (node.classList.contains("katex-html")) {
+      return node;
+    }
+    const root = node.querySelector(".katex-html");
+    return root instanceof Element ? root : null;
+  }
+
+  function parseKatexTopValue(node) {
+    if (!(node instanceof Element)) {
+      return null;
+    }
+    const style = node.getAttribute("style") || "";
+    const match = style.match(/top:\s*(-?\d+(?:\.\d+)?)em/i);
+    if (!match) {
+      return null;
+    }
+    return Number.parseFloat(match[1]);
+  }
+
+  function getKatexColumnEntries(node) {
+    if (!(node instanceof Element)) {
+      return [];
+    }
+    const vlist = node.querySelector(".vlist");
+    if (!(vlist instanceof Element)) {
+      return [];
+    }
+
+    const entries = [];
+    vlist.childNodes.forEach((child) => {
+      if (!(child instanceof Element)) {
+        return;
+      }
+      const top = parseKatexTopValue(child);
+      if (!Number.isFinite(top)) {
+        return;
+      }
+      const text = normalizeKatexFallbackText(extractKatexRawText(child));
+      if (!text) {
+        return;
+      }
+      entries.push({ top, text });
+    });
+
+    entries.sort((left, right) => left.top - right.top);
+    return entries.map((entry) => entry.text);
+  }
+
+  function getKatexTableColumns(tableNode) {
+    if (!(tableNode instanceof Element)) {
+      return [];
+    }
+
+    return Array.from(tableNode.childNodes)
+      .filter((child) => child instanceof Element)
+      .map((child) => {
+        const className = child.getAttribute("class") || "";
+        if (!/(?:^|\s)col-align-/.test(className)) {
+          return null;
+        }
+        const entries = getKatexColumnEntries(child);
+        if (!entries.length) {
+          return null;
+        }
+        return {
+          entries,
+          separator: entries.every((entry) => /^\|+$/.test(entry))
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function getKatexDelimiterPair(node) {
+    if (!(node instanceof Element)) {
+      return null;
+    }
+
+    const openNode = node.querySelector(".mopen");
+    const closeNode = node.querySelector(".mclose");
+    if (!(openNode instanceof Element) && !(closeNode instanceof Element)) {
+      return null;
+    }
+
+    const openText = normalizeKatexFallbackText(extractKatexRawText(openNode));
+    const closeText = normalizeKatexFallbackText(extractKatexRawText(closeNode));
+    const delimiterPairs = {
+      "(": { open: "\\left(", close: "\\right)" },
+      ")": { open: "\\left(", close: "\\right)" },
+      "[": { open: "\\left[", close: "\\right]" },
+      "]": { open: "\\left[", close: "\\right]" },
+      "{": { open: "\\left\\{", close: "\\right\\}" },
+      "}": { open: "\\left\\{", close: "\\right\\}" },
+      "|": { open: "\\left|", close: "\\right|" },
+      "||": { open: "\\left\\Vert", close: "\\right\\Vert" },
+      "⟨": { open: "\\left\\langle", close: "\\right\\rangle" },
+      "⟩": { open: "\\left\\langle", close: "\\right\\rangle" }
+    };
+
+    if (openText && delimiterPairs[openText]) {
+      return delimiterPairs[openText];
+    }
+    if (closeText && delimiterPairs[closeText]) {
+      return delimiterPairs[closeText];
+    }
+    return { open: "\\left(", close: "\\right)" };
+  }
+
+  function reconstructKatexMatrixLatex(node) {
+    const htmlRoot = getKatexHtmlRoot(node);
+    if (!(htmlRoot instanceof Element)) {
+      return "";
+    }
+
+    const table = htmlRoot.querySelector(".mtable");
+    if (!(table instanceof Element)) {
+      return "";
+    }
+
+    const columns = getKatexTableColumns(table);
+    if (!columns.length) {
+      return "";
+    }
+
+    const dataColumns = columns.filter((column) => !column.separator);
+    if (!dataColumns.length) {
+      return "";
+    }
+
+    const rowCount = dataColumns.reduce((max, column) => Math.max(max, column.entries.length), 0);
+    if (!rowCount) {
+      return "";
+    }
+
+    const rows = [];
+    for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+      const row = dataColumns.map((column) => column.entries[rowIndex] || "").join(" & ").trim();
+      if (row) {
+        rows.push(row);
+      }
+    }
+    if (!rows.length) {
+      return "";
+    }
+
+    const columnSpec = columns
+      .map((column) => (column.separator ? "|" : "c"))
+      .join("")
+      .replace(/^\|+/, "")
+      .replace(/\|+$/, "");
+    if (!columnSpec) {
+      return "";
+    }
+
+    const body = rows.join(" \\\\ ");
+    const delimiters = getKatexDelimiterPair(htmlRoot);
+    if (!delimiters) {
+      if (columnSpec.includes("|")) {
+        return `\\begin{array}{${columnSpec}} ${body} \\end{array}`;
+      }
+      return `\\begin{matrix} ${body} \\end{matrix}`;
+    }
+
+    return `${delimiters.open}\\begin{array}{${columnSpec}} ${body} \\end{array}${delimiters.close}`;
+  }
+
   function detectMathDisplayMode(node) {
     if (isMathScriptNode(node)) {
       const type = (node.getAttribute("type") || "").toLowerCase();
@@ -891,7 +1103,7 @@
     if (!mathRoot || mathRoot !== node) {
       return "";
     }
-    const latex = extractLatex(mathRoot);
+    const latex = extractLatex(mathRoot) || reconstructKatexMatrixLatex(mathRoot);
     if (!latex) {
       return "";
     }

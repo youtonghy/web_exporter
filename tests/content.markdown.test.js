@@ -296,6 +296,55 @@ function createFallbackMathWithoutLatex(visibleText) {
   return { root, visibleLeaf };
 }
 
+function createKatexVListColumn(values) {
+  const slots = values.map((value, index) =>
+    el("span", { style: `top: -${4.21 - index * 1.2}em;` }, [
+      el("span", { class: "pstrut", style: "height: 3em;" }),
+      el("span", { class: "mord" }, [text(value)])
+    ])
+  );
+
+  return el("span", { class: "col-align-c" }, [
+    el("span", { class: "vlist-t vlist-t2" }, [
+      el("span", { class: "vlist-r" }, [el("span", { class: "vlist", style: "height: 2.05em;" }, slots)]),
+      el("span", { class: "vlist-s" }, [text("​")]),
+      el("span", { class: "vlist-r" }, [el("span", { class: "vlist", style: "height: 1.55em;" }, [el("span")])])
+    ])
+  ]);
+}
+
+function createHtmlOnlyAugmentedMatrix() {
+  const leftBracket = el("span", { class: "mopen" }, [
+    el("span", { class: "delimsizing mult" }, [
+      el("img", { class: "katex-svg", src: "data:image/svg+xml;utf8,<svg></svg>" })
+    ])
+  ]);
+  const rightBracket = el("span", { class: "mclose" }, [
+    el("span", { class: "delimsizing mult" }, [
+      el("img", { class: "katex-svg", src: "data:image/svg+xml;utf8,<svg></svg>" })
+    ])
+  ]);
+  const table = el("span", { class: "mtable" }, [
+    createKatexVListColumn(["1", "0", "0"]),
+    el("span", { class: "arraycolsep", style: "width: 0.5em;" }),
+    createKatexVListColumn(["2", "0", "0"]),
+    el("span", { class: "arraycolsep", style: "width: 0.5em;" }),
+    createKatexVListColumn(["0", "1", "0"]),
+    el("span", { class: "arraycolsep", style: "width: 0.5em;" }),
+    createKatexVListColumn(["3", "-1", "0"]),
+    el("span", { class: "arraycolsep", style: "width: 0.5em;" }),
+    createKatexVListColumn(["|", "|", "|"]),
+    el("span", { class: "arraycolsep", style: "width: 0.5em;" }),
+    createKatexVListColumn(["2b-5a", "6a-2b", "7a-3b+c"])
+  ]);
+  const visibleLeaf = table.childNodes[0].querySelector(".mord");
+  const html = el("span", { class: "katex-html", "aria-hidden": "true" }, [
+    el("span", { class: "base" }, [leftBracket, el("span", { class: "mord" }, [table]), rightBracket])
+  ]);
+  const root = el("span", { class: "katex" }, [html]);
+  return { root, visibleLeaf };
+}
+
 function createPlainPreBlock() {
   const lineBreak = el("br", {}, []);
   const code = el("code", {}, [
@@ -419,6 +468,20 @@ test("falls back to readable text when KaTeX source is missing", () => {
   const formula = createFallbackMathWithoutLatex("abc");
 
   assert.equal(hooks.elementToMarkdown(formula.root), "abc");
+});
+
+test("reconstructs html-only KaTeX augmented matrices into latex", () => {
+  const hooks = loadContentHooks();
+  const matrix = createHtmlOnlyAugmentedMatrix();
+  const markdown = hooks.elementToMarkdown(matrix.root);
+
+  assert.equal(hooks.resolveSelectableTarget(matrix.visibleLeaf), matrix.root);
+  assert.equal(
+    markdown,
+    "$\\left(\\begin{array}{cccc|c} 1 & 2 & 0 & 3 & 2b-5a \\\\ 0 & 0 & 1 & -1 & 6a-2b \\\\ 0 & 0 & 0 & 0 & 7a-3b+c \\end{array}\\right)$"
+  );
+  assert.ok(!markdown.includes("data:image/svg+xml"));
+  assert.ok(!markdown.includes("![]("));
 });
 
 test("preserves line breaks in plain preformatted code blocks", () => {
