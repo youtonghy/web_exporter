@@ -8,6 +8,8 @@
   const ENHANCED_IMAGE_LOAD_TIMEOUT_MS = 8000;
   const IFRAME_LOAD_TIMEOUT_MS = 3000;
   const SCROLLABLE_OVERFLOW_VALUES = new Set(["auto", "scroll", "overlay"]);
+  const GENERIC_CODE_CLASS_HINTS = ["pre", "code", "highlight", "syntax", "editor", "snippet"];
+  const GENERIC_CODE_FONT_STACK = 'ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace';
   const CODE_BLOCK_CONTROL_LABELS = new Set([
     "copy",
     "copied",
@@ -137,6 +139,11 @@
       if (match) {
         return match;
       }
+    }
+
+    const genericCodeRoot = getGenericCodeBlockRoot(node);
+    if (genericCodeRoot) {
+      return genericCodeRoot;
     }
 
     return null;
@@ -1645,6 +1652,58 @@
     return classValue ? classValue.split(/\s+/).filter(Boolean) : [];
   }
 
+  function hasCodeLikeClass(node) {
+    return getClassTokens(node).some((token) => {
+      const normalized = token.toLowerCase();
+      return GENERIC_CODE_CLASS_HINTS.some((hint) => normalized.includes(hint));
+    });
+  }
+
+  function getTextLineCount(text) {
+    if (typeof text !== "string" || !text) {
+      return 0;
+    }
+    return text.split(/\r?\n/).filter((line) => line.length || /\n/.test(text)).length;
+  }
+
+  function hasPreformattedTextShape(node) {
+    if (!isElementNode(node)) {
+      return false;
+    }
+
+    const text = (node.textContent || "").replace(/\u00a0/g, " ");
+    if (!text.includes("\n")) {
+      return false;
+    }
+
+    const meaningfulLines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return meaningfulLines.length >= 2;
+  }
+
+  function isGenericTextCodeBlock(node) {
+    return isElementNode(node) && hasCodeLikeClass(node) && hasPreformattedTextShape(node);
+  }
+
+  function getGenericCodeBlockRoot(node) {
+    if (!isElementNode(node)) {
+      return null;
+    }
+
+    let current = node;
+    let match = null;
+    while (current && isElementNode(current)) {
+      if (isGenericTextCodeBlock(current)) {
+        match = current;
+      }
+      current = current.parentNode;
+    }
+
+    return match;
+  }
+
   function hasPrintHiddenClass(node) {
     return getClassTokens(node).some((token) => token.includes("print-hidden") || token.includes("hidden-print"));
   }
@@ -1713,6 +1772,42 @@
       if (opacity && opacity !== "0") {
         forceStyleProperty(cloneNode, "opacity", opacity);
       }
+      applied += 1;
+    }
+
+    return applied;
+  }
+
+  function applyGenericCodeBlockFormatting(sourceRoot, cloneRoot) {
+    const sourceNodes = getElementTree(sourceRoot);
+    const cloneNodes = getElementTree(cloneRoot);
+    let applied = 0;
+
+    for (let i = 0; i < sourceNodes.length; i += 1) {
+      const sourceNode = sourceNodes[i];
+      const cloneNode = cloneNodes[i];
+
+      if (!isElementNode(sourceNode) || !isElementNode(cloneNode) || !isGenericTextCodeBlock(sourceNode)) {
+        continue;
+      }
+
+      forceStyleProperty(cloneNode, "white-space", "pre-wrap");
+      forceStyleProperty(cloneNode, "overflow-wrap", "anywhere");
+      forceStyleProperty(cloneNode, "display", "block");
+
+      const computed = window.getComputedStyle(sourceNode);
+      const fontFamily = computed && typeof computed.fontFamily === "string" ? computed.fontFamily.trim() : "";
+      forceStyleProperty(cloneNode, "font-family", fontFamily || GENERIC_CODE_FONT_STACK);
+
+      const sourceHeight = getNodeMeasuredHeight(sourceNode);
+      const cloneHeight = Math.max(getNodeMeasuredHeight(cloneNode), Number(cloneNode.scrollHeight) || 0, sourceHeight);
+      if (cloneHeight > 0) {
+        forceStyleProperty(cloneNode, "overflow", "visible");
+        forceStyleProperty(cloneNode, "overflow-y", "visible");
+        forceStyleProperty(cloneNode, "max-height", "none");
+        forceStyleProperty(cloneNode, "height", `${Math.ceil(cloneHeight)}px`);
+      }
+
       applied += 1;
     }
 
@@ -2052,6 +2147,7 @@
 
     if (isElementNode(sourceRoot) && isElementNode(cloneRoot)) {
       applyPrintVisibilityOverrides(sourceRoot, cloneRoot);
+      applyGenericCodeBlockFormatting(sourceRoot, cloneRoot);
     }
 
     expandMonacoEditors(mountedRoot);
@@ -2298,6 +2394,7 @@
 
   if (globalThis.__WEB_EXPORTER_TEST_HOOKS__) {
     globalThis.__WEB_EXPORTER_TEST_HOOKS__ = {
+      applyGenericCodeBlockFormatting,
       applyPrintVisibilityOverrides,
       convertMathNode,
       formatCodeBlock,
@@ -2309,8 +2406,10 @@
       getCodeBlockRoot,
       getCodeContentRoot,
       getDocumentContentHeight,
+      getGenericCodeBlockRoot,
       getMathRoot,
       getVisualExportRoot,
+      isGenericTextCodeBlock,
       isExpandableScrollableElement,
       isMathRoot,
       isCodeBlockRoot,

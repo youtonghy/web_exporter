@@ -30,6 +30,17 @@ class MockNode {
   }
 }
 
+class MockTextNode extends MockNode {
+  constructor(value, ownerDocument = null) {
+    super(3, ownerDocument);
+    this.nodeValue = value;
+  }
+
+  get textContent() {
+    return this.nodeValue;
+  }
+}
+
 class MockStyleDeclaration {
   constructor() {
     this.__priorities = {};
@@ -305,6 +316,10 @@ function createElement(tagName, ownerDocument, attrs = {}) {
   }
 }
 
+function text(value, ownerDocument = null) {
+  return new MockTextNode(value, ownerDocument);
+}
+
 function loadContentHooks() {
   const source = fs.readFileSync(path.join(__dirname, "..", "content.js"), "utf8");
   const context = createTestContext();
@@ -394,6 +409,46 @@ function createMonacoSnippet(ownerDocument) {
   };
 }
 
+function createGenericCodeBlock(ownerDocument) {
+  const wrapper = createElement("div", ownerDocument, { class: "amber-el amber-pre" });
+  const content = createElement("div", ownerDocument, { class: "syntax-highlight" });
+  content.appendChild(
+    text(
+      "Total time: 100\nNumber of drones: 2\nNumber of lanterns: 15\nDrones (starting location):\n1\n10\nLanterns (location, arrival time):\n1 1\n1 2\n1 3\n1 4\n1 5\n",
+      ownerDocument
+    )
+  );
+  wrapper.appendChild(content);
+
+  wrapper.clientHeight = 80;
+  wrapper.offsetHeight = 80;
+  wrapper.scrollHeight = 240;
+  content.clientHeight = 80;
+  content.offsetHeight = 80;
+  content.scrollHeight = 240;
+
+  setComputedStyle(wrapper, {
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    fontFamily: '"Fira Code", monospace',
+    height: "80px"
+  });
+  setComputedStyle(content, {
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    fontFamily: '"Fira Code", monospace',
+    height: "80px"
+  });
+
+  return { wrapper, content };
+}
+
 test("resolves Monaco visual selection to the snippet root for pdf exports", () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
@@ -432,6 +487,46 @@ test("expands Monaco editor containers to full content height", () => {
   assert.equal(snippet.overflowGuard.style.height, "6268px");
   assert.equal(snippet.scrollable.style.height, "6268px");
   assert.equal(snippet.scrollable.style.overflow, "visible");
+});
+
+test("resolves generic code-like div blocks to the outer wrapper for pdf exports", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const block = createGenericCodeBlock(ownerDocument);
+
+  assert.equal(hooks.resolveSelectableTarget(block.content, "pdf"), block.wrapper);
+  assert.equal(hooks.getVisualExportRoot(block.content), block.wrapper);
+  assert.equal(hooks.getGenericCodeBlockRoot(block.content), block.wrapper);
+});
+
+test("preserves line breaks for generic div code blocks in print clone", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createGenericCodeBlock(ownerDocument).wrapper;
+  const clone = createGenericCodeBlock(ownerDocument).wrapper;
+
+  const applied = hooks.applyGenericCodeBlockFormatting(source, clone);
+
+  assert.equal(applied, 2);
+  assert.equal(clone.style.whiteSpace, "pre-wrap");
+  assert.equal(clone.style.overflowWrap, "anywhere");
+  assert.equal(clone.style.display, "block");
+  assert.equal(clone.style.fontFamily, '"Fira Code", monospace');
+  assert.equal(clone.style.height, "240px");
+});
+
+test("expands generic div code block containers with hidden overflow", async () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createGenericCodeBlock(ownerDocument).wrapper;
+  const clone = createGenericCodeBlock(ownerDocument).wrapper;
+
+  await hooks.prepareMountedPrintRoot(source, clone);
+
+  assert.equal(clone.style.height, "240px");
+  assert.equal(clone.style.maxHeight, "none");
+  assert.equal(clone.style.overflow, "visible");
+  assert.equal(clone.style.whiteSpace, "pre-wrap");
 });
 
 test("expands vertically scrollable block containers", () => {
