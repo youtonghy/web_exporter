@@ -128,8 +128,25 @@
     return target && (target.id === OVERLAY_ID || target.closest(`#${OVERLAY_ID}`));
   }
 
+  function normalizeSelectableNode(node) {
+    if (isElementNode(node)) {
+      return node;
+    }
+
+    let current = node;
+    while (current && current.nodeType === Node.TEXT_NODE) {
+      current = current.parentNode;
+      if (isElementNode(current)) {
+        return current;
+      }
+    }
+
+    return isElementNode(current) ? current : null;
+  }
+
   function getVisualCodeBlockRoot(node) {
-    if (!isElementNode(node)) {
+    const element = normalizeSelectableNode(node);
+    if (!isElementNode(element)) {
       return null;
     }
 
@@ -147,13 +164,13 @@
       "pre"
     ];
     for (const selector of prioritizedSelectors) {
-      const match = node.closest(selector);
+      const match = element.closest(selector);
       if (match) {
         return match;
       }
     }
 
-    const genericCodeRoot = getGenericCodeBlockRoot(node);
+    const genericCodeRoot = getGenericCodeBlockRoot(element);
     if (genericCodeRoot) {
       return genericCodeRoot;
     }
@@ -162,31 +179,33 @@
   }
 
   function getVisualExportRoot(node) {
-    if (!isElementNode(node)) {
+    const element = normalizeSelectableNode(node);
+    if (!isElementNode(element)) {
       return node;
     }
 
-    const codeBlockRoot = getVisualCodeBlockRoot(node);
+    const codeBlockRoot = getVisualCodeBlockRoot(element);
     if (codeBlockRoot) {
       return codeBlockRoot;
     }
 
-    const mathRoot = getMathRoot(node);
-    return mathRoot || node;
+    const mathRoot = getMathRoot(element);
+    return mathRoot || element;
   }
 
   function resolveSelectableTarget(target, formatOverride = "markdown") {
-    if (!isElementNode(target)) {
+    const element = normalizeSelectableNode(target);
+    if (!isElementNode(element)) {
       return target;
     }
 
-    const codeBlockRoot = formatOverride === "markdown" ? getCodeBlockRoot(target) : getVisualCodeBlockRoot(target);
+    const codeBlockRoot = formatOverride === "markdown" ? getCodeBlockRoot(element) : getVisualCodeBlockRoot(element);
     if (codeBlockRoot) {
       return codeBlockRoot;
     }
 
-    const mathRoot = getMathRoot(target);
-    return mathRoot || target;
+    const mathRoot = getMathRoot(element);
+    return mathRoot || element;
   }
 
   function startSelection(keepStyles, format, enhancedImages) {

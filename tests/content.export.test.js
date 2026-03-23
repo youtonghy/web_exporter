@@ -617,6 +617,16 @@ test("resolves generic code-like div blocks to the outer wrapper for pdf exports
   assert.equal(hooks.getGenericCodeBlockRoot(block.content), block.wrapper);
 });
 
+test("resolves text-node clicks inside generic code blocks to the outer wrapper for pdf exports", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const block = createGenericCodeBlock(ownerDocument);
+  const textNode = block.content.childNodes[0];
+
+  assert.equal(hooks.resolveSelectableTarget(textNode, "pdf"), block.wrapper);
+  assert.equal(hooks.getVisualExportRoot(textNode), block.wrapper);
+});
+
 test("resolves Ed Amber visual selection to the outer code card for pdf exports", () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
@@ -624,6 +634,16 @@ test("resolves Ed Amber visual selection to the outer code card for pdf exports"
 
   assert.equal(hooks.resolveSelectableTarget(block.screenSyntax, "pdf"), block.screenCard);
   assert.equal(hooks.getVisualExportRoot(block.screenSyntax), block.screenCard);
+});
+
+test("resolves text-node clicks inside Ed Amber code blocks to the outer code card for pdf exports", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const block = createEdAmberCodePair(ownerDocument);
+  const textNode = block.screenSyntax.childNodes[0];
+
+  assert.equal(hooks.resolveSelectableTarget(textNode, "pdf"), block.screenCard);
+  assert.equal(hooks.getVisualExportRoot(textNode), block.screenCard);
 });
 
 test("preserves line breaks for generic div code blocks in print clone", () => {
