@@ -24,15 +24,49 @@ class MockNode {
     this.childNodes.push(child);
     return child;
   }
+
+  get textContent() {
+    return this.childNodes.map((child) => child.textContent || "").join("");
+  }
 }
 
 class MockStyleDeclaration {
-  setProperty(name, value) {
+  constructor() {
+    this.__priorities = {};
+  }
+
+  setProperty(name, value, priority = "") {
     this[toCamelCase(name)] = String(value);
+    this.__priorities[toCamelCase(name)] = String(priority || "");
   }
 
   getPropertyValue(name) {
     return this[toCamelCase(name)] || "";
+  }
+
+  getPropertyPriority(name) {
+    return this.__priorities[toCamelCase(name)] || "";
+  }
+}
+
+class MockClassList {
+  constructor(owner, initial = []) {
+    this.owner = owner;
+    this.values = new Set(initial.filter(Boolean));
+  }
+
+  add(...tokens) {
+    tokens.filter(Boolean).forEach((token) => this.values.add(token));
+    this.owner.attributes.class = Array.from(this.values).join(" ");
+  }
+
+  remove(...tokens) {
+    tokens.filter(Boolean).forEach((token) => this.values.delete(token));
+    this.owner.attributes.class = Array.from(this.values).join(" ");
+  }
+
+  contains(token) {
+    return this.values.has(token);
   }
 }
 
@@ -42,10 +76,15 @@ class MockElement extends MockNode {
     this.tagName = tagName.toUpperCase();
     this.attributes = {};
     this.style = new MockStyleDeclaration();
+    this.classList = new MockClassList(this);
     this.__computedStyle = {
       length: 0,
       overflow: "",
       overflowY: "",
+      display: "",
+      visibility: "",
+      opacity: "1",
+      height: "",
       getPropertyValue() {
         return "";
       }
@@ -61,7 +100,11 @@ class MockElement extends MockNode {
   }
 
   setAttribute(name, value) {
-    this.attributes[name] = String(value);
+    const normalized = String(value);
+    this.attributes[name] = normalized;
+    if (name === "class") {
+      this.classList = new MockClassList(this, normalized.split(/\s+/));
+    }
   }
 
   getAttribute(name) {
@@ -91,8 +134,37 @@ class MockElement extends MockNode {
     handlers.slice().forEach((handler) => handler());
   }
 
+  matches(selector) {
+    const trimmed = selector.trim();
+    if (!trimmed) {
+      return false;
+    }
+    if (trimmed === "*") {
+      return true;
+    }
+    if (trimmed.startsWith(".")) {
+      return this.classList.contains(trimmed.slice(1));
+    }
+    if (trimmed.startsWith("#")) {
+      return this.getAttribute("id") === trimmed.slice(1);
+    }
+    return this.tagName.toLowerCase() === trimmed.toLowerCase();
+  }
+
+  closest(selector) {
+    const selectors = selector.split(",").map((item) => item.trim()).filter(Boolean);
+    let current = this;
+    while (current) {
+      if (selectors.some((item) => current.matches(item))) {
+        return current;
+      }
+      current = current.parentNode instanceof MockElement ? current.parentNode : null;
+    }
+    return null;
+  }
+
   querySelectorAll(selector) {
-    const normalized = selector.trim().toLowerCase();
+    const selectors = selector.split(",").map((item) => item.trim()).filter(Boolean);
     const results = [];
 
     const visit = (node) => {
@@ -100,7 +172,7 @@ class MockElement extends MockNode {
         if (!(child instanceof MockElement)) {
           return;
         }
-        if (normalized === "*" || child.tagName.toLowerCase() === normalized) {
+        if (selectors.some((item) => child.matches(item))) {
           results.push(child);
         }
         visit(child);
@@ -109,6 +181,14 @@ class MockElement extends MockNode {
 
     visit(this);
     return results;
+  }
+
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+
+  get textContent() {
+    return this.childNodes.map((child) => child.textContent || "").join("");
   }
 }
 
@@ -233,6 +313,127 @@ function loadContentHooks() {
   return context.__WEB_EXPORTER_TEST_HOOKS__;
 }
 
+function setComputedStyle(node, values = {}) {
+  node.__computedStyle = {
+    length: 0,
+    overflow: "",
+    overflowY: "",
+    display: "",
+    visibility: "",
+    opacity: "1",
+    height: "",
+    getPropertyValue(name) {
+      return this[toCamelCase(name)] || "";
+    },
+    ...values
+  };
+}
+
+function createMonacoSnippet(ownerDocument) {
+  const snippet = createElement("div", ownerDocument, { class: "snippet ed-print-hidden" });
+  const snipInner = createElement("div", ownerDocument, { class: "snip-inner" });
+  const snipEditor = createElement("div", ownerDocument, { class: "snip-editor" });
+  const edMonaco = createElement("div", ownerDocument, { class: "ed-monaco" });
+  const monacoEditor = createElement("div", ownerDocument, { class: "monaco-editor" });
+  const overflowGuard = createElement("div", ownerDocument, { class: "overflow-guard" });
+  const scrollable = createElement("div", ownerDocument, { class: "monaco-scrollable-element editor-scrollable" });
+  const linesContent = createElement("div", ownerDocument, { class: "lines-content" });
+  const viewLines = createElement("div", ownerDocument, { class: "view-lines" });
+  const viewLine = createElement("div", ownerDocument, { class: "view-line" });
+
+  snippet.appendChild(snipInner);
+  snipInner.appendChild(snipEditor);
+  snipEditor.appendChild(edMonaco);
+  edMonaco.appendChild(monacoEditor);
+  monacoEditor.appendChild(overflowGuard);
+  overflowGuard.appendChild(scrollable);
+  scrollable.appendChild(linesContent);
+  linesContent.appendChild(viewLines);
+  viewLines.appendChild(viewLine);
+
+  monacoEditor.style.height = "300px";
+  overflowGuard.style.height = "300px";
+  scrollable.style.height = "300px";
+  viewLines.style.height = "6268px";
+  linesContent.style.height = "6268px";
+
+  monacoEditor.clientHeight = 300;
+  monacoEditor.offsetHeight = 300;
+  overflowGuard.clientHeight = 300;
+  overflowGuard.offsetHeight = 300;
+  scrollable.clientHeight = 300;
+  scrollable.offsetHeight = 300;
+  viewLines.scrollHeight = 6268;
+  viewLines.clientHeight = 6268;
+  viewLines.offsetHeight = 6268;
+  linesContent.scrollHeight = 6268;
+  linesContent.clientHeight = 6268;
+  linesContent.offsetHeight = 6268;
+
+  setComputedStyle(snippet, { display: "block", visibility: "visible", opacity: "1" });
+  setComputedStyle(snipInner, { display: "block", visibility: "visible", opacity: "1" });
+  setComputedStyle(snipEditor, { display: "block", visibility: "visible", opacity: "1" });
+  setComputedStyle(edMonaco, { display: "block", visibility: "visible", opacity: "1" });
+  setComputedStyle(monacoEditor, { display: "block", visibility: "visible", opacity: "1", height: "300px" });
+  setComputedStyle(overflowGuard, { display: "block", visibility: "visible", opacity: "1", overflow: "hidden", overflowY: "hidden", height: "300px" });
+  setComputedStyle(scrollable, { display: "block", visibility: "visible", opacity: "1", overflow: "hidden", overflowY: "hidden", height: "300px" });
+  setComputedStyle(linesContent, { display: "block", visibility: "visible", opacity: "1", height: "6268px" });
+  setComputedStyle(viewLines, { display: "block", visibility: "visible", opacity: "1", height: "6268px" });
+
+  return {
+    snippet,
+    snipInner,
+    snipEditor,
+    edMonaco,
+    monacoEditor,
+    overflowGuard,
+    scrollable,
+    linesContent,
+    viewLines,
+    viewLine
+  };
+}
+
+test("resolves Monaco visual selection to the snippet root for pdf exports", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const snippet = createMonacoSnippet(ownerDocument);
+
+  assert.equal(hooks.resolveSelectableTarget(snippet.viewLine, "pdf"), snippet.snippet);
+  assert.equal(hooks.getVisualExportRoot(snippet.viewLine), snippet.snippet);
+});
+
+test("keeps print-hidden Monaco cards visible in the print clone", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createMonacoSnippet(ownerDocument).snippet;
+  const clone = createMonacoSnippet(ownerDocument).snippet;
+
+  const applied = hooks.applyPrintVisibilityOverrides(source, clone);
+
+  assert.equal(applied, 1);
+  assert.equal(clone.style.display, "block");
+  assert.equal(clone.style.visibility, "visible");
+  assert.equal(clone.style.opacity, "1");
+  assert.equal(clone.style.getPropertyPriority("display"), "important");
+});
+
+test("expands Monaco editor containers to full content height", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const snippet = createMonacoSnippet(ownerDocument);
+
+  const expanded = hooks.expandMonacoEditors(snippet.snippet);
+
+  assert.equal(expanded, 5);
+  assert.equal(snippet.snipEditor.style.height, "6268px");
+  assert.equal(snippet.edMonaco.style.height, "6268px");
+  assert.equal(snippet.monacoEditor.style.height, "6268px");
+  assert.equal(snippet.overflowGuard.style.height, "6268px");
+  assert.equal(snippet.scrollable.style.height, "6268px");
+  assert.equal(snippet.scrollable.style.overflow, "visible");
+});
+
 test("expands vertically scrollable block containers", () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
@@ -240,14 +441,7 @@ test("expands vertically scrollable block containers", () => {
   const block = createElement("div", ownerDocument);
   block.scrollHeight = 480;
   block.clientHeight = 120;
-  block.__computedStyle = {
-    length: 0,
-    overflow: "",
-    overflowY: "auto",
-    getPropertyValue() {
-      return "";
-    }
-  };
+  setComputedStyle(block, { overflowY: "auto" });
   root.appendChild(block);
 
   const expanded = hooks.expandScrollableElements(root);
@@ -265,14 +459,7 @@ test("does not touch non-scrollable containers", () => {
   const block = createElement("pre", ownerDocument);
   block.scrollHeight = 160;
   block.clientHeight = 160;
-  block.__computedStyle = {
-    length: 0,
-    overflow: "",
-    overflowY: "auto",
-    getPropertyValue() {
-      return "";
-    }
-  };
+  setComputedStyle(block, { overflowY: "auto" });
   root.appendChild(block);
 
   const expanded = hooks.expandScrollableElements(root);

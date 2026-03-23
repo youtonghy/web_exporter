@@ -126,14 +126,46 @@
     return target && (target.id === OVERLAY_ID || target.closest(`#${OVERLAY_ID}`));
   }
 
-  function resolveSelectableTarget(target) {
-    if (!(target instanceof Element)) {
-      return target;
+  function getVisualCodeBlockRoot(node) {
+    if (!isElementNode(node)) {
+      return null;
     }
-    const codeBlockRoot = getCodeBlockRoot(target);
+
+    const prioritizedSelectors = [".snippet", ".snip-inner", ".snip-editor", ".ed-monaco", ".monaco-editor", ".cm-editor", "pre"];
+    for (const selector of prioritizedSelectors) {
+      const match = node.closest(selector);
+      if (match) {
+        return match;
+      }
+    }
+
+    return null;
+  }
+
+  function getVisualExportRoot(node) {
+    if (!isElementNode(node)) {
+      return node;
+    }
+
+    const codeBlockRoot = getVisualCodeBlockRoot(node);
     if (codeBlockRoot) {
       return codeBlockRoot;
     }
+
+    const mathRoot = getMathRoot(node);
+    return mathRoot || node;
+  }
+
+  function resolveSelectableTarget(target, formatOverride = "markdown") {
+    if (!isElementNode(target)) {
+      return target;
+    }
+
+    const codeBlockRoot = formatOverride === "markdown" ? getCodeBlockRoot(target) : getVisualCodeBlockRoot(target);
+    if (codeBlockRoot) {
+      return codeBlockRoot;
+    }
+
     const mathRoot = getMathRoot(target);
     return mathRoot || target;
   }
@@ -170,7 +202,7 @@
     if (!selecting) {
       return;
     }
-    const target = resolveSelectableTarget(event.target);
+    const target = resolveSelectableTarget(event.target, exportFormat);
     if (!target || isOverlayTarget(target)) {
       return;
     }
@@ -181,7 +213,7 @@
     if (!selecting) {
       return;
     }
-    const target = resolveSelectableTarget(event.target);
+    const target = resolveSelectableTarget(event.target, exportFormat);
     if (!target || isOverlayTarget(target)) {
       return;
     }
@@ -1596,12 +1628,95 @@
     return node && node.tagName ? node.tagName.toLowerCase() : "";
   }
 
+  function isElementNode(node) {
+    return Boolean(node && node.nodeType === Node.ELEMENT_NODE && typeof node.tagName === "string");
+  }
+
   function getElementTree(root) {
-    if (!(root instanceof Element)) {
+    if (!isElementNode(root)) {
       return [];
     }
     const descendants = typeof root.querySelectorAll === "function" ? Array.from(root.querySelectorAll("*")) : [];
     return [root, ...descendants];
+  }
+
+  function getClassTokens(node) {
+    const classValue = getAttributeValue(node, "class");
+    return classValue ? classValue.split(/\s+/).filter(Boolean) : [];
+  }
+
+  function hasPrintHiddenClass(node) {
+    return getClassTokens(node).some((token) => token.includes("print-hidden") || token.includes("hidden-print"));
+  }
+
+  function forceStyleProperty(node, name, value) {
+    if (!isElementNode(node) || !node.style || typeof value !== "string" || !value) {
+      return;
+    }
+
+    if (typeof node.style.setProperty === "function") {
+      node.style.setProperty(name, value, "important");
+      return;
+    }
+
+    node.style[name] = value;
+  }
+
+  function isNodeVisibleOnScreen(node) {
+    if (!isElementNode(node)) {
+      return false;
+    }
+
+    const computed = window.getComputedStyle(node);
+    if (!computed) {
+      return false;
+    }
+
+    if (computed.display === "none") {
+      return false;
+    }
+    if (computed.visibility === "hidden" || computed.visibility === "collapse") {
+      return false;
+    }
+
+    const opacity = computed.opacity == null ? "" : String(computed.opacity).trim();
+    return opacity !== "0";
+  }
+
+  function applyPrintVisibilityOverrides(sourceRoot, cloneRoot) {
+    const sourceNodes = getElementTree(sourceRoot);
+    const cloneNodes = getElementTree(cloneRoot);
+    let applied = 0;
+
+    for (let i = 0; i < sourceNodes.length; i += 1) {
+      const sourceNode = sourceNodes[i];
+      const cloneNode = cloneNodes[i];
+
+      if (!isElementNode(sourceNode) || !isElementNode(cloneNode)) {
+        continue;
+      }
+      if (!hasPrintHiddenClass(sourceNode) || !isNodeVisibleOnScreen(sourceNode)) {
+        continue;
+      }
+
+      const computed = window.getComputedStyle(sourceNode);
+      const display = computed && typeof computed.display === "string" ? computed.display : "";
+      const visibility = computed && typeof computed.visibility === "string" ? computed.visibility : "";
+      const opacity = computed && computed.opacity != null ? String(computed.opacity) : "";
+
+      if (display && display !== "none") {
+        forceStyleProperty(cloneNode, "display", display);
+      }
+      if (visibility && visibility !== "hidden" && visibility !== "collapse") {
+        forceStyleProperty(cloneNode, "visibility", visibility);
+      }
+      if (opacity && opacity !== "0") {
+        forceStyleProperty(cloneNode, "opacity", opacity);
+      }
+      applied += 1;
+    }
+
+    return applied;
   }
 
   function isIframeElement(node) {
@@ -1631,7 +1746,7 @@
   }
 
   function isExpandableScrollableElement(node) {
-    if (!(node instanceof Element) || isIgnoredScrollableRoot(node) || isIframeElement(node)) {
+    if (!isElementNode(node) || isIgnoredScrollableRoot(node) || isIframeElement(node)) {
       return false;
     }
 
@@ -1649,7 +1764,7 @@
   }
 
   function setExpandedBlockHeight(node, height) {
-    if (!(node instanceof Element) || !node.style) {
+    if (!isElementNode(node) || !node.style) {
       return false;
     }
 
@@ -1676,6 +1791,140 @@
       if (setExpandedBlockHeight(node, node.scrollHeight)) {
         expanded += 1;
       }
+    });
+
+    return expanded;
+  }
+
+  function parsePixelValue(value) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value !== "string") {
+      return 0;
+    }
+
+    const match = value.trim().match(/^(-?\d+(?:\.\d+)?)px$/i);
+    if (!match) {
+      return 0;
+    }
+
+    return Number(match[1]) || 0;
+  }
+
+  function getNodeMeasuredHeight(node) {
+    if (!isElementNode(node)) {
+      return 0;
+    }
+
+    const styleHeight = node.style && typeof node.style.height === "string" ? parsePixelValue(node.style.height) : 0;
+    const attributeHeight = parsePixelValue((getAttributeValue(node, "style").match(/(?:^|;)\s*height\s*:\s*([^;]+)/i) || [])[1] || "");
+    const scrollHeight = Number(node.scrollHeight) || 0;
+    const clientHeight = Number(node.clientHeight) || 0;
+    const offsetHeight = Number(node.offsetHeight) || 0;
+    const computed = window.getComputedStyle(node);
+    const computedHeight = computed && typeof computed.height === "string" ? parsePixelValue(computed.height) : 0;
+
+    return Math.max(styleHeight, attributeHeight, scrollHeight, clientHeight, offsetHeight, computedHeight);
+  }
+
+  function hasAnyClass(node, classNames) {
+    if (!isElementNode(node) || !node.classList) {
+      return false;
+    }
+
+    return classNames.some((name) => node.classList.contains(name));
+  }
+
+  function getMonacoEditorContainers(root) {
+    if (!isElementNode(root)) {
+      return [];
+    }
+
+    const candidates = [];
+    const pushUnique = (node) => {
+      if (isElementNode(node) && !candidates.includes(node)) {
+        candidates.push(node);
+      }
+    };
+
+    if (hasAnyClass(root, ["snippet", "snip-inner", "snip-editor", "ed-monaco", "monaco-editor"])) {
+      pushUnique(root);
+    }
+
+    const selectors = [".snippet", ".snip-inner", ".snip-editor", ".ed-monaco", ".monaco-editor"];
+    selectors.forEach((selector) => {
+      root.querySelectorAll(selector).forEach(pushUnique);
+    });
+
+    return candidates.filter((node) => node.querySelector(".monaco-editor") || hasAnyClass(node, ["monaco-editor"]));
+  }
+
+  function getMonacoContentHeight(root) {
+    let maxHeight = 0;
+    const heightCarrierClasses = ["view-lines", "lines-content", "margin-view-overlays", "margin", "monaco-scrollable-element", "overflow-guard", "monaco-editor"];
+
+    getElementTree(root).forEach((node) => {
+      if (!isElementNode(node)) {
+        return;
+      }
+
+      if (!hasAnyClass(node, heightCarrierClasses) && node !== root) {
+        return;
+      }
+
+      maxHeight = Math.max(maxHeight, getNodeMeasuredHeight(node));
+    });
+
+    return Math.ceil(maxHeight);
+  }
+
+  function getMonacoHeightTargets(root) {
+    if (!isElementNode(root)) {
+      return [];
+    }
+
+    const targets = [];
+    const pushUnique = (node) => {
+      if (isElementNode(node) && !targets.includes(node)) {
+        targets.push(node);
+      }
+    };
+
+    if (hasAnyClass(root, ["snippet", "snip-inner", "snip-editor", "ed-monaco", "monaco-editor", "overflow-guard", "monaco-scrollable-element"])) {
+      pushUnique(root);
+    }
+
+    const primarySelectors = [".snip-editor", ".ed-monaco", ".monaco-editor", ".overflow-guard", ".monaco-scrollable-element"];
+    primarySelectors.forEach((selector) => {
+      root.querySelectorAll(selector).forEach(pushUnique);
+    });
+
+    return targets;
+  }
+
+  function expandMonacoEditors(root) {
+    const editors = getMonacoEditorContainers(root);
+    let expanded = 0;
+
+    editors.forEach((editorRoot) => {
+      const height = getMonacoContentHeight(editorRoot);
+      if (!height) {
+        return;
+      }
+
+      getMonacoHeightTargets(editorRoot).forEach((node) => {
+        if (!node.style) {
+          return;
+        }
+        node.style.overflow = "visible";
+        node.style.overflowY = "visible";
+        node.style.maxHeight = "none";
+        node.style.height = `${height}px`;
+      });
+
+      expanded += 1;
     });
 
     return expanded;
@@ -1765,7 +2014,8 @@
     }
 
     const root = doc.body || doc.documentElement;
-    if (root instanceof Element) {
+    if (isElementNode(root)) {
+      expandMonacoEditors(root);
       expandScrollableElements(root);
     }
 
@@ -1782,7 +2032,7 @@
   }
 
   function expandSameOriginIframes(root) {
-    if (!(root instanceof Element) || typeof root.querySelectorAll !== "function") {
+    if (!isElementNode(root) || typeof root.querySelectorAll !== "function") {
       return Promise.resolve([]);
     }
 
@@ -1794,10 +2044,21 @@
     return Promise.all(iframes.map((iframe) => expandIframeElementToContent(iframe)));
   }
 
-  async function prepareMountedPrintRoot(root) {
-    expandScrollableElements(root);
-    await expandSameOriginIframes(root);
-    expandScrollableElements(root);
+  async function prepareMountedPrintRoot(sourceRoot, cloneRoot) {
+    const mountedRoot = cloneRoot || sourceRoot;
+    if (!isElementNode(mountedRoot)) {
+      return;
+    }
+
+    if (isElementNode(sourceRoot) && isElementNode(cloneRoot)) {
+      applyPrintVisibilityOverrides(sourceRoot, cloneRoot);
+    }
+
+    expandMonacoEditors(mountedRoot);
+    expandScrollableElements(mountedRoot);
+    await expandSameOriginIframes(mountedRoot);
+    expandMonacoEditors(mountedRoot);
+    expandScrollableElements(mountedRoot);
   }
 
   function buildPrintPayload(target, keepStyles, enhancedImages) {
@@ -1814,7 +2075,7 @@
       ? "margin:0;padding:16px;background:#ffffff;"
       : "margin:0;padding:16px;font-family:Arial, sans-serif;background:#ffffff;";
 
-    return { clone, baseHref, bodyStyle };
+    return { clone, baseHref, bodyStyle, sourceRoot: target };
   }
 
   function populatePrintDocument(doc, payload) {
@@ -1854,6 +2115,7 @@
 
     const imported = doc.importNode(clone, true);
     doc.body.appendChild(imported);
+    return imported;
   }
 
   function waitForFontsInDocument(doc) {
@@ -1870,7 +2132,7 @@
     }
 
     const doc = printWindow.document;
-    populatePrintDocument(doc, payload);
+    const importedRoot = populatePrintDocument(doc, payload);
 
     const triggerPrint = () => {
       try {
@@ -1882,8 +2144,8 @@
     };
 
     const schedulePrint = () => {
-      const printableRoot = doc.body.firstElementChild || doc.body;
-      waitForPrintAssets(printableRoot, doc, enhancedImages).finally(() => {
+      const printableRoot = isElementNode(importedRoot) ? importedRoot : doc.body.firstElementChild || doc.body;
+      waitForPrintAssets(printableRoot, doc, payload.sourceRoot, enhancedImages).finally(() => {
         setTimeout(triggerPrint, 50);
       });
     };
@@ -1945,11 +2207,11 @@
     ]);
   }
 
-  function waitForPrintAssets(container, doc, enhancedImages) {
+  function waitForPrintAssets(container, doc, sourceRoot, enhancedImages) {
     return Promise.all([
       waitForFontsInDocument(doc || document).catch(() => undefined),
       waitForImages(container, getImageLoadTimeout(enhancedImages), enhancedImages)
-    ]).then(() => prepareMountedPrintRoot(container).catch(() => undefined));
+    ]).then(() => prepareMountedPrintRoot(sourceRoot || container, container).catch(() => undefined));
   }
 
   async function printInPage(target, keepStyles, enhancedImages) {
@@ -2012,7 +2274,7 @@
     };
 
     window.addEventListener("afterprint", cleanup, { once: true });
-    await waitForPrintAssets(clone, document, enhancedImages);
+    await waitForPrintAssets(clone, document, target, enhancedImages);
     window.print();
   }
 
@@ -2036,17 +2298,20 @@
 
   if (globalThis.__WEB_EXPORTER_TEST_HOOKS__) {
     globalThis.__WEB_EXPORTER_TEST_HOOKS__ = {
+      applyPrintVisibilityOverrides,
       convertMathNode,
       formatCodeBlock,
       detectMathDisplayMode,
       elementToMarkdown,
       expandIframeElementToContent,
+      expandMonacoEditors,
       expandScrollableElements,
       getCodeBlockRoot,
       getCodeContentRoot,
       getDocumentContentHeight,
-      isExpandableScrollableElement,
       getMathRoot,
+      getVisualExportRoot,
+      isExpandableScrollableElement,
       isMathRoot,
       isCodeBlockRoot,
       prepareMountedPrintRoot,
