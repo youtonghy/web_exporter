@@ -6,6 +6,8 @@
   const PRINT_STYLE_ID = "__web_exporter_print_style__";
   const IMAGE_LOAD_TIMEOUT_MS = 2000;
   const ENHANCED_IMAGE_LOAD_TIMEOUT_MS = 8000;
+  const IFRAME_LOAD_TIMEOUT_MS = 3000;
+  const SCROLLABLE_OVERFLOW_VALUES = new Set(["auto", "scroll", "overlay"]);
   const CODE_BLOCK_CONTROL_LABELS = new Set([
     "copy",
     "copied",
@@ -1590,6 +1592,214 @@
     }
   }
 
+  function getElementTagName(node) {
+    return node && node.tagName ? node.tagName.toLowerCase() : "";
+  }
+
+  function getElementTree(root) {
+    if (!(root instanceof Element)) {
+      return [];
+    }
+    const descendants = typeof root.querySelectorAll === "function" ? Array.from(root.querySelectorAll("*")) : [];
+    return [root, ...descendants];
+  }
+
+  function isIframeElement(node) {
+    if (typeof HTMLIFrameElement !== "undefined" && node instanceof HTMLIFrameElement) {
+      return true;
+    }
+    return getElementTagName(node) === "iframe";
+  }
+
+  function isTextAreaElement(node) {
+    if (typeof HTMLTextAreaElement !== "undefined" && node instanceof HTMLTextAreaElement) {
+      return true;
+    }
+    return getElementTagName(node) === "textarea";
+  }
+
+  function isIgnoredScrollableRoot(node) {
+    const tag = getElementTagName(node);
+    return tag === "html" || tag === "body";
+  }
+
+  function getComputedOverflowY(node) {
+    const computed = window.getComputedStyle(node);
+    const overflowY = computed && typeof computed.overflowY === "string" ? computed.overflowY : "";
+    const overflow = computed && typeof computed.overflow === "string" ? computed.overflow : "";
+    return (overflowY || overflow || "").trim().toLowerCase();
+  }
+
+  function isExpandableScrollableElement(node) {
+    if (!(node instanceof Element) || isIgnoredScrollableRoot(node) || isIframeElement(node)) {
+      return false;
+    }
+
+    const scrollHeight = Number(node.scrollHeight) || 0;
+    const clientHeight = Number(node.clientHeight) || 0;
+    if (!scrollHeight || scrollHeight <= clientHeight + 1) {
+      return false;
+    }
+
+    if (isTextAreaElement(node)) {
+      return true;
+    }
+
+    return SCROLLABLE_OVERFLOW_VALUES.has(getComputedOverflowY(node));
+  }
+
+  function setExpandedBlockHeight(node, height) {
+    if (!(node instanceof Element) || !node.style) {
+      return false;
+    }
+
+    const nextHeight = Math.max(0, Math.ceil(Number(height) || 0));
+    if (!nextHeight) {
+      return false;
+    }
+
+    node.style.overflowY = "visible";
+    node.style.maxHeight = "none";
+    node.style.height = `${nextHeight}px`;
+    return true;
+  }
+
+  function expandScrollableElements(root) {
+    const nodes = getElementTree(root).reverse();
+    let expanded = 0;
+
+    nodes.forEach((node) => {
+      if (!isExpandableScrollableElement(node)) {
+        return;
+      }
+
+      if (setExpandedBlockHeight(node, node.scrollHeight)) {
+        expanded += 1;
+      }
+    });
+
+    return expanded;
+  }
+
+  function readIframeDocument(iframe) {
+    try {
+      return {
+        accessible: true,
+        doc: iframe.contentDocument || (iframe.contentWindow ? iframe.contentWindow.document : null) || null
+      };
+    } catch (error) {
+      return {
+        accessible: false,
+        doc: null
+      };
+    }
+  }
+
+  function getIframeDocument(iframe) {
+    return readIframeDocument(iframe).doc;
+  }
+
+  function getDocumentContentHeight(doc) {
+    if (!doc) {
+      return 0;
+    }
+
+    const body = doc.body || null;
+    const docEl = doc.documentElement || null;
+    const bodyHeight = body
+      ? Math.max(Number(body.scrollHeight) || 0, Number(body.offsetHeight) || 0, Number(body.clientHeight) || 0)
+      : 0;
+    const docHeight = docEl
+      ? Math.max(Number(docEl.scrollHeight) || 0, Number(docEl.offsetHeight) || 0, Number(docEl.clientHeight) || 0)
+      : 0;
+    return Math.max(bodyHeight, docHeight);
+  }
+
+  function waitForIframeLoad(iframe) {
+    const initial = readIframeDocument(iframe);
+    if (!initial.accessible) {
+      return Promise.resolve(null);
+    }
+    if (initial.doc && (!initial.doc.readyState || initial.doc.readyState === "complete" || initial.doc.readyState === "interactive")) {
+      return Promise.resolve(initial.doc);
+    }
+    if (!initial.doc && iframe && typeof iframe.getAttribute === "function" && !iframe.getAttribute("src") && !iframe.getAttribute("srcdoc")) {
+      return Promise.resolve(null);
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = null;
+
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+        }
+        resolve(getIframeDocument(iframe));
+      };
+
+      timer = setTimeout(finish, IFRAME_LOAD_TIMEOUT_MS);
+
+      if (iframe && typeof iframe.addEventListener === "function") {
+        iframe.addEventListener("load", finish, { once: true });
+        iframe.addEventListener("error", finish, { once: true });
+        return;
+      }
+
+      finish();
+    });
+  }
+
+  async function expandIframeElementToContent(iframe) {
+    if (!isIframeElement(iframe) || !iframe.style) {
+      return false;
+    }
+
+    const doc = await waitForIframeLoad(iframe);
+    if (!doc) {
+      return false;
+    }
+
+    const root = doc.body || doc.documentElement;
+    if (root instanceof Element) {
+      expandScrollableElements(root);
+    }
+
+    const height = getDocumentContentHeight(doc);
+    if (!height) {
+      return false;
+    }
+
+    iframe.style.overflow = "hidden";
+    iframe.style.overflowY = "hidden";
+    iframe.style.maxHeight = "none";
+    iframe.style.height = `${Math.ceil(height)}px`;
+    return true;
+  }
+
+  function expandSameOriginIframes(root) {
+    if (!(root instanceof Element) || typeof root.querySelectorAll !== "function") {
+      return Promise.resolve([]);
+    }
+
+    const iframes = Array.from(root.querySelectorAll("iframe"));
+    if (!iframes.length) {
+      return Promise.resolve([]);
+    }
+
+    return Promise.all(iframes.map((iframe) => expandIframeElementToContent(iframe)));
+  }
+
+  async function prepareMountedPrintRoot(root) {
+    expandScrollableElements(root);
+    await expandSameOriginIframes(root);
+    expandScrollableElements(root);
+  }
+
   function buildPrintPayload(target, keepStyles, enhancedImages) {
     const clone = target.cloneNode(true);
     prepareClone(target, clone, {
@@ -1646,6 +1856,13 @@
     doc.body.appendChild(imported);
   }
 
+  function waitForFontsInDocument(doc) {
+    if (doc && doc.fonts && doc.fonts.ready) {
+      return doc.fonts.ready;
+    }
+    return Promise.resolve();
+  }
+
   function openPrintWindow(payload, enhancedImages) {
     const printWindow = window.open("", "_blank", "noopener,noreferrer");
     if (!printWindow) {
@@ -1664,18 +1881,9 @@
       }
     };
 
-    const waitForFontsInDocument = () => {
-      if (doc.fonts && doc.fonts.ready) {
-        return doc.fonts.ready;
-      }
-      return Promise.resolve();
-    };
-
     const schedulePrint = () => {
-      Promise.all([
-        waitForFontsInDocument().catch(() => undefined),
-        waitForImages(doc.body, getImageLoadTimeout(enhancedImages), enhancedImages)
-      ]).finally(() => {
+      const printableRoot = doc.body.firstElementChild || doc.body;
+      waitForPrintAssets(printableRoot, doc, enhancedImages).finally(() => {
         setTimeout(triggerPrint, 50);
       });
     };
@@ -1705,10 +1913,7 @@
   }
 
   function waitForFonts() {
-    if (document.fonts && document.fonts.ready) {
-      return document.fonts.ready;
-    }
-    return Promise.resolve();
+    return waitForFontsInDocument(document);
   }
 
   function waitForImages(root, timeoutMs, enhancedImages) {
@@ -1740,11 +1945,11 @@
     ]);
   }
 
-  function waitForPrintAssets(container, enhancedImages) {
+  function waitForPrintAssets(container, doc, enhancedImages) {
     return Promise.all([
-      waitForFonts().catch(() => undefined),
+      waitForFontsInDocument(doc || document).catch(() => undefined),
       waitForImages(container, getImageLoadTimeout(enhancedImages), enhancedImages)
-    ]);
+    ]).then(() => prepareMountedPrintRoot(container).catch(() => undefined));
   }
 
   async function printInPage(target, keepStyles, enhancedImages) {
@@ -1807,7 +2012,7 @@
     };
 
     window.addEventListener("afterprint", cleanup, { once: true });
-    await waitForPrintAssets(container, enhancedImages);
+    await waitForPrintAssets(clone, document, enhancedImages);
     window.print();
   }
 
@@ -1835,11 +2040,16 @@
       formatCodeBlock,
       detectMathDisplayMode,
       elementToMarkdown,
+      expandIframeElementToContent,
+      expandScrollableElements,
       getCodeBlockRoot,
       getCodeContentRoot,
+      getDocumentContentHeight,
+      isExpandableScrollableElement,
       getMathRoot,
       isMathRoot,
       isCodeBlockRoot,
+      prepareMountedPrintRoot,
       resolveSelectableTarget
     };
   }
