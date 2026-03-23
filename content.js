@@ -133,7 +133,19 @@
       return null;
     }
 
-    const prioritizedSelectors = [".snippet", ".snip-inner", ".snip-editor", ".ed-monaco", ".monaco-editor", ".cm-editor", "pre"];
+    const prioritizedSelectors = [
+      ".amber-display-codeblock",
+      ".amdiscb-slot",
+      ".amber-pre",
+      ".syntax-highlight",
+      ".snippet",
+      ".snip-inner",
+      ".snip-editor",
+      ".ed-monaco",
+      ".monaco-editor",
+      ".cm-editor",
+      "pre"
+    ];
     for (const selector of prioritizedSelectors) {
       const match = node.closest(selector);
       if (match) {
@@ -1758,21 +1770,92 @@
         continue;
       }
 
-      const computed = window.getComputedStyle(sourceNode);
-      const display = computed && typeof computed.display === "string" ? computed.display : "";
-      const visibility = computed && typeof computed.visibility === "string" ? computed.visibility : "";
-      const opacity = computed && computed.opacity != null ? String(computed.opacity) : "";
-
-      if (display && display !== "none") {
-        forceStyleProperty(cloneNode, "display", display);
-      }
-      if (visibility && visibility !== "hidden" && visibility !== "collapse") {
-        forceStyleProperty(cloneNode, "visibility", visibility);
-      }
-      if (opacity && opacity !== "0") {
-        forceStyleProperty(cloneNode, "opacity", opacity);
-      }
+      syncVisiblePrintStyles(sourceNode, cloneNode);
       applied += 1;
+    }
+
+    return applied;
+  }
+
+  function syncVisiblePrintStyles(sourceNode, cloneNode) {
+    if (!isElementNode(sourceNode) || !isElementNode(cloneNode)) {
+      return false;
+    }
+
+    const computed = window.getComputedStyle(sourceNode);
+    const display = computed && typeof computed.display === "string" ? computed.display : "";
+    const visibility = computed && typeof computed.visibility === "string" ? computed.visibility : "";
+    const opacity = computed && computed.opacity != null ? String(computed.opacity) : "";
+
+    if (display && display !== "none") {
+      forceStyleProperty(cloneNode, "display", display);
+    }
+    if (visibility && visibility !== "hidden" && visibility !== "collapse") {
+      forceStyleProperty(cloneNode, "visibility", visibility);
+    }
+    if (opacity && opacity !== "0") {
+      forceStyleProperty(cloneNode, "opacity", opacity);
+    }
+    return true;
+  }
+
+  function isEdAmberCodeBlockNode(node) {
+    return hasAnyClass(node, ["amber-display-codeblock", "amdiscb-slot", "amber-pre", "syntax-highlight"]);
+  }
+
+  function isEdAmberScreenCodeBlock(node) {
+    return isEdAmberCodeBlockNode(node) && hasAnyClass(node, ["ed-print-hidden"]);
+  }
+
+  function isEdAmberPrintOnlyCodeBlock(node) {
+    return isEdAmberCodeBlockNode(node) && hasAnyClass(node, ["ed-print-visible"]);
+  }
+
+  function findSiblingEdPrintVisibleNodes(node) {
+    const parent = node && node.parentNode;
+    if (!isElementNode(parent) || !parent.childNodes) {
+      return [];
+    }
+
+    return Array.from(parent.childNodes).filter((child) => child !== node && isEdAmberPrintOnlyCodeBlock(child));
+  }
+
+  function applyEdPrintPairOverrides(sourceRoot, cloneRoot) {
+    const sourceNodes = getElementTree(sourceRoot);
+    const cloneNodes = getElementTree(cloneRoot);
+    const sourceIndexMap = new Map();
+    let applied = 0;
+
+    sourceNodes.forEach((node, index) => {
+      sourceIndexMap.set(node, index);
+    });
+
+    for (let i = 0; i < sourceNodes.length; i += 1) {
+      const sourceNode = sourceNodes[i];
+      const cloneNode = cloneNodes[i];
+
+      if (!isElementNode(sourceNode) || !isElementNode(cloneNode) || !isEdAmberScreenCodeBlock(sourceNode) || !isNodeVisibleOnScreen(sourceNode)) {
+        continue;
+      }
+
+      const siblingPrintNodes = findSiblingEdPrintVisibleNodes(sourceNode);
+      if (!siblingPrintNodes.length) {
+        continue;
+      }
+
+      syncVisiblePrintStyles(sourceNode, cloneNode);
+      siblingPrintNodes.forEach((siblingNode) => {
+        const siblingIndex = sourceIndexMap.get(siblingNode);
+        const cloneSibling = typeof siblingIndex === "number" ? cloneNodes[siblingIndex] : null;
+        if (!isElementNode(cloneSibling)) {
+          return;
+        }
+
+        forceStyleProperty(cloneSibling, "display", "none");
+        forceStyleProperty(cloneSibling, "visibility", "hidden");
+        forceStyleProperty(cloneSibling, "opacity", "0");
+        applied += 1;
+      });
     }
 
     return applied;
@@ -1791,11 +1874,15 @@
         continue;
       }
 
+      const computed = window.getComputedStyle(sourceNode);
+      const display = computed && typeof computed.display === "string" ? computed.display.trim() : "";
+
       forceStyleProperty(cloneNode, "white-space", "pre-wrap");
       forceStyleProperty(cloneNode, "overflow-wrap", "anywhere");
-      forceStyleProperty(cloneNode, "display", "block");
+      if (display && display !== "none") {
+        forceStyleProperty(cloneNode, "display", display);
+      }
 
-      const computed = window.getComputedStyle(sourceNode);
       const fontFamily = computed && typeof computed.fontFamily === "string" ? computed.fontFamily.trim() : "";
       forceStyleProperty(cloneNode, "font-family", fontFamily || GENERIC_CODE_FONT_STACK);
 
@@ -1806,6 +1893,44 @@
         forceStyleProperty(cloneNode, "overflow-y", "visible");
         forceStyleProperty(cloneNode, "max-height", "none");
         forceStyleProperty(cloneNode, "height", `${Math.ceil(cloneHeight)}px`);
+      }
+
+      applied += 1;
+    }
+
+    return applied;
+  }
+
+  function applyEdAmberCodeBlockFormatting(sourceRoot, cloneRoot) {
+    const sourceNodes = getElementTree(sourceRoot);
+    const cloneNodes = getElementTree(cloneRoot);
+    let applied = 0;
+
+    for (let i = 0; i < sourceNodes.length; i += 1) {
+      const sourceNode = sourceNodes[i];
+      const cloneNode = cloneNodes[i];
+
+      if (!isElementNode(sourceNode) || !isElementNode(cloneNode) || !isEdAmberCodeBlockNode(sourceNode)) {
+        continue;
+      }
+
+      const computed = window.getComputedStyle(sourceNode);
+      const fontFamily = computed && typeof computed.fontFamily === "string" ? computed.fontFamily.trim() : "";
+      const display = computed && typeof computed.display === "string" ? computed.display.trim() : "";
+      const height = Math.max(getNodeMeasuredHeight(sourceNode), getNodeMeasuredHeight(cloneNode), Number(cloneNode.scrollHeight) || 0);
+
+      if (display && display !== "none") {
+        forceStyleProperty(cloneNode, "display", display);
+      }
+      forceStyleProperty(cloneNode, "white-space", "pre-wrap");
+      forceStyleProperty(cloneNode, "overflow-wrap", "anywhere");
+      forceStyleProperty(cloneNode, "overflow", "visible");
+      forceStyleProperty(cloneNode, "overflow-y", "visible");
+      forceStyleProperty(cloneNode, "max-height", "none");
+      forceStyleProperty(cloneNode, "font-family", fontFamily || GENERIC_CODE_FONT_STACK);
+
+      if (height > 0) {
+        forceStyleProperty(cloneNode, "height", `${Math.ceil(height)}px`);
       }
 
       applied += 1;
@@ -2147,7 +2272,9 @@
 
     if (isElementNode(sourceRoot) && isElementNode(cloneRoot)) {
       applyPrintVisibilityOverrides(sourceRoot, cloneRoot);
+      applyEdPrintPairOverrides(sourceRoot, cloneRoot);
       applyGenericCodeBlockFormatting(sourceRoot, cloneRoot);
+      applyEdAmberCodeBlockFormatting(sourceRoot, cloneRoot);
     }
 
     expandMonacoEditors(mountedRoot);
@@ -2394,6 +2521,8 @@
 
   if (globalThis.__WEB_EXPORTER_TEST_HOOKS__) {
     globalThis.__WEB_EXPORTER_TEST_HOOKS__ = {
+      applyEdAmberCodeBlockFormatting,
+      applyEdPrintPairOverrides,
       applyGenericCodeBlockFormatting,
       applyPrintVisibilityOverrides,
       convertMathNode,

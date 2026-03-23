@@ -449,6 +449,124 @@ function createGenericCodeBlock(ownerDocument) {
   return { wrapper, content };
 }
 
+function createEdAmberCodePair(ownerDocument) {
+  const sourceText =
+    "Total time: 100\nNumber of drones: 2\nNumber of lanterns: 15\nDrones (starting location):\n1\n10\nLanterns (location, arrival time):\n1 1\n1 2\n1 3\n1 4\n1 5\n";
+  const root = createElement("section", ownerDocument);
+  const screenCard = createElement("div", ownerDocument, { class: "amber-display-codeblock amber-el amber-content ed-print-hidden" });
+  const screenSlot = createElement("div", ownerDocument, { class: "amdiscb-slot" });
+  const screenPre = createElement("div", ownerDocument, { class: "amber-el amber-pre" });
+  const screenSyntax = createElement("div", ownerDocument, { class: "syntax-highlight" });
+  const printCard = createElement("div", ownerDocument, { class: "amber-display-codeblock amber-el amber-content ed-print-visible" });
+  const printSlot = createElement("div", ownerDocument, { class: "amdiscb-slot" });
+  const printPre = createElement("div", ownerDocument, { class: "amber-el amber-pre" });
+  const printSyntax = createElement("div", ownerDocument, { class: "syntax-highlight" });
+
+  screenSyntax.appendChild(text(sourceText, ownerDocument));
+  printSyntax.appendChild(text(sourceText, ownerDocument));
+  screenPre.appendChild(screenSyntax);
+  printPre.appendChild(printSyntax);
+  screenSlot.appendChild(screenPre);
+  printSlot.appendChild(printPre);
+  screenCard.appendChild(screenSlot);
+  printCard.appendChild(printSlot);
+  root.appendChild(screenCard);
+  root.appendChild(printCard);
+
+  [screenCard, screenSlot, screenPre, screenSyntax, printCard, printSlot, printPre, printSyntax].forEach((node) => {
+    node.clientHeight = 90;
+    node.offsetHeight = 90;
+    node.scrollHeight = 260;
+  });
+
+  setComputedStyle(screenCard, {
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    fontFamily: '"Source Code Pro", monospace',
+    height: "90px"
+  });
+  setComputedStyle(screenSlot, {
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    whiteSpace: "pre",
+    fontFamily: '"Source Code Pro", monospace',
+    height: "90px"
+  });
+  setComputedStyle(screenPre, {
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    fontFamily: '"Source Code Pro", monospace',
+    height: "90px"
+  });
+  setComputedStyle(screenSyntax, {
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    fontFamily: '"Source Code Pro", monospace',
+    height: "90px"
+  });
+  setComputedStyle(printCard, {
+    display: "none",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    fontFamily: '"Source Code Pro", monospace',
+    height: "90px"
+  });
+  setComputedStyle(printSlot, {
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    whiteSpace: "pre",
+    fontFamily: '"Source Code Pro", monospace',
+    height: "90px"
+  });
+  setComputedStyle(printPre, {
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    fontFamily: '"Source Code Pro", monospace',
+    height: "90px"
+  });
+  setComputedStyle(printSyntax, {
+    display: "block",
+    visibility: "visible",
+    opacity: "1",
+    overflow: "hidden",
+    overflowY: "hidden",
+    fontFamily: '"Source Code Pro", monospace',
+    height: "90px"
+  });
+
+  return {
+    root,
+    screenCard,
+    screenSlot,
+    screenPre,
+    screenSyntax,
+    printCard,
+    printSlot,
+    printPre,
+    printSyntax
+  };
+}
+
 test("resolves Monaco visual selection to the snippet root for pdf exports", () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
@@ -499,6 +617,15 @@ test("resolves generic code-like div blocks to the outer wrapper for pdf exports
   assert.equal(hooks.getGenericCodeBlockRoot(block.content), block.wrapper);
 });
 
+test("resolves Ed Amber visual selection to the outer code card for pdf exports", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const block = createEdAmberCodePair(ownerDocument);
+
+  assert.equal(hooks.resolveSelectableTarget(block.screenSyntax, "pdf"), block.screenCard);
+  assert.equal(hooks.getVisualExportRoot(block.screenSyntax), block.screenCard);
+});
+
 test("preserves line breaks for generic div code blocks in print clone", () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
@@ -527,6 +654,26 @@ test("expands generic div code block containers with hidden overflow", async () 
   assert.equal(clone.style.maxHeight, "none");
   assert.equal(clone.style.overflow, "visible");
   assert.equal(clone.style.whiteSpace, "pre-wrap");
+});
+
+test("keeps only the visible Ed Amber screen clone and expands it for print", async () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createEdAmberCodePair(ownerDocument);
+  const clone = createEdAmberCodePair(ownerDocument);
+
+  await hooks.prepareMountedPrintRoot(source.root, clone.root);
+
+  assert.equal(clone.screenCard.style.display, "block");
+  assert.equal(clone.screenCard.style.getPropertyPriority("display"), "important");
+  assert.equal(clone.printCard.style.display, "none");
+  assert.equal(clone.printCard.style.getPropertyPriority("display"), "important");
+  assert.equal(clone.screenSlot.style.whiteSpace, "pre-wrap");
+  assert.equal(clone.screenSyntax.style.whiteSpace, "pre-wrap");
+  assert.equal(clone.screenSlot.style.overflow, "visible");
+  assert.equal(clone.screenSlot.style.maxHeight, "none");
+  assert.equal(clone.screenSlot.style.height, "260px");
+  assert.equal(clone.screenPre.style.height, "260px");
 });
 
 test("expands vertically scrollable block containers", () => {
