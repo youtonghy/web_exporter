@@ -401,6 +401,67 @@ function createCodeMirrorBlock() {
   return { root, editor, codeLeaf };
 }
 
+function createSimpleTable() {
+  return el("table", {}, [
+    el("tr", {}, [
+      el("th", { align: "left" }, [text("Name")]),
+      el("th", { align: "right" }, [text("Score")])
+    ]),
+    el("tr", {}, [
+      el("td", {}, [text("Alice")]),
+      el("td", {}, [text("10")])
+    ]),
+    el("tr", {}, [
+      el("td", {}, [text("Bob")]),
+      el("td", {}, [text("12")])
+    ])
+  ]);
+}
+
+function createComplexTable() {
+  return el("table", {}, [
+    el("tr", {}, [
+      el("td", { rowspan: "2" }, [text("A")]),
+      el("td", {}, [el("p", {}, [text("B")])])
+    ]),
+    el("tr", {}, [
+      el("td", {}, [text("C")])
+    ])
+  ]);
+}
+
+function createFigureBlock() {
+  return el("figure", {}, [
+    el("img", { alt: "diagram", src: "https://example.com/diagram.png" }),
+    el("figcaption", {}, [text("A simple caption")])
+  ]);
+}
+
+function createDefinitionList() {
+  return el("dl", {}, [
+    el("dt", {}, [text("Term")]),
+    el("dd", {}, [text("Definition")])
+  ]);
+}
+
+function createDetailsBlock() {
+  return el("details", {}, [
+    el("summary", {}, [text("More")]),
+    el("p", {}, [text("Hidden body")])
+  ]);
+}
+
+function createInlineHtmlFormattingBlock() {
+  return el("p", {}, [
+    text("x"),
+    el("sup", {}, [text("2")]),
+    text(" and "),
+    el("sub", {}, [text("i")]),
+    text(" "),
+    el("kbd", {}, [text("Esc")])
+  ]);
+}
+
 test("resolves clicks inside KaTeX display math to the display root", () => {
   const hooks = loadContentHooks();
   const formula = createDisplayMath("A = [4, 7, 1, 9, 3]", "A");
@@ -550,6 +611,56 @@ test("exports CodeMirror code blocks as fenced code with detected language", () 
     hooks.elementToMarkdown(hooks.resolveSelectableTarget(block.codeLeaf)),
     "```python\nfor i in range(n):\n    for j in range(n):\n        print(i, j)\n```"
   );
+});
+
+test("exports simple tables as markdown tables", () => {
+  const hooks = loadContentHooks();
+  const table = createSimpleTable();
+
+  assert.equal(
+    hooks.elementToMarkdown(table),
+    "| Name | Score |\n| :--- | ---: |\n| Alice | 10 |\n| Bob | 12 |"
+  );
+});
+
+test("falls back to html for complex tables", () => {
+  const hooks = loadContentHooks();
+  const table = createComplexTable();
+  const markdown = hooks.elementToMarkdown(table);
+
+  assert.ok(markdown.startsWith("<table"));
+  assert.ok(markdown.includes('rowspan="2"'));
+});
+
+test("exports figure captions as markdown paragraphs", () => {
+  const hooks = loadContentHooks();
+  const figure = createFigureBlock();
+
+  assert.equal(
+    hooks.elementToMarkdown(figure),
+    "![diagram](https://example.com/diagram.png)\n\nA simple caption"
+  );
+});
+
+test("exports definition lists as term definition pairs", () => {
+  const hooks = loadContentHooks();
+  const dl = createDefinitionList();
+
+  assert.equal(hooks.elementToMarkdown(dl), "Term\n: Definition");
+});
+
+test("exports details blocks with summary text", () => {
+  const hooks = loadContentHooks();
+  const details = createDetailsBlock();
+
+  assert.equal(hooks.elementToMarkdown(details), "**More**\n\nHidden body");
+});
+
+test("preserves sup sub and kbd tags inline", () => {
+  const hooks = loadContentHooks();
+  const block = createInlineHtmlFormattingBlock();
+
+  assert.equal(hooks.elementToMarkdown(block), "x<sup>2</sup> and <sub>i</sub> <kbd>Esc</kbd>");
 });
 
 test("treats custom container elements with block children as block wrappers", () => {

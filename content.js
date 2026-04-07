@@ -459,6 +459,295 @@
       .trim();
   }
 
+  function escapeHtmlText(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function escapeHtmlAttribute(value) {
+    return escapeHtmlText(value).replace(/"/g, "&quot;");
+  }
+
+  function getAttributeEntries(node) {
+    if (!(node instanceof Element)) {
+      return [];
+    }
+    if (typeof node.getAttributeNames === "function") {
+      return node.getAttributeNames().map((name) => [name, node.getAttribute(name) || ""]);
+    }
+    const attributes = node.attributes;
+    if (!attributes) {
+      return [];
+    }
+    if (typeof attributes.length === "number" && typeof attributes.item === "function") {
+      const entries = [];
+      for (let index = 0; index < attributes.length; index += 1) {
+        const attribute = attributes.item(index);
+        if (attribute) {
+          entries.push([attribute.name, attribute.value]);
+        }
+      }
+      return entries;
+    }
+    return Object.keys(attributes)
+      .filter((name) => !/^\d+$/.test(name))
+      .map((name) => [name, attributes[name]]);
+  }
+
+  function serializeHtmlNode(node) {
+    if (!node) {
+      return "";
+    }
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeHtmlText(node.nodeValue || "");
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    const tag = node.tagName.toLowerCase();
+    const attrs = getAttributeEntries(node)
+      .map(([name, value]) => ` ${name}="${escapeHtmlAttribute(value)}"`)
+      .join("");
+    const children = Array.from(node.childNodes || []).map((child) => serializeHtmlNode(child)).join("");
+    const voidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+    if (voidTags.has(tag)) {
+      return `<${tag}${attrs}>`;
+    }
+    return `<${tag}${attrs}>${children}</${tag}>`;
+  }
+
+  function escapeMarkdownTableCell(text) {
+    return escapeMarkdownText(String(text || "")).replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+  }
+
+  function getDirectElementChildren(node) {
+    return Array.from(node.childNodes || []).filter((child) => child instanceof Element);
+  }
+
+  function getBlockLevelChildElements(node) {
+    return getDirectElementChildren(node).filter((child) => {
+      const tag = child.tagName.toLowerCase();
+      return BLOCK_TAGS.has(tag) || isCustomElementTag(tag);
+    });
+  }
+
+  function hasComplexBlockContent(node) {
+    const stack = getDirectElementChildren(node).slice();
+    while (stack.length) {
+      const current = stack.pop();
+      const tag = current.tagName.toLowerCase();
+      if (BLOCK_TAGS.has(tag) || isCustomElementTag(tag)) {
+        return true;
+      }
+      stack.push(...getDirectElementChildren(current));
+    }
+    return false;
+  }
+
+  function getTableCellAlignment(cell) {
+    if (!(cell instanceof Element)) {
+      return "";
+    }
+    const alignAttr = (cell.getAttribute("align") || "").toLowerCase();
+    if (alignAttr === "left" || alignAttr === "center" || alignAttr === "right") {
+      return alignAttr;
+    }
+    const style = (cell.getAttribute("style") || "").toLowerCase();
+    const match = style.match(/text-align\s*:\s*(left|center|right)/i);
+    return match ? match[1].toLowerCase() : "";
+  }
+
+  function convertTableCellContent(cell, context) {
+    const cellContext = { ...context, tableCell: true };
+    const content = convertInlineChildren(cell, cellContext).trim();
+    return content ? escapeMarkdownTableCell(content) : "";
+  }
+
+  function convertTable(node, context) {
+    const rows = getDirectElementChildren(node).filter((child) => child.tagName.toLowerCase() === "tr");
+    const groupedRows = rows.length ? rows : Array.from(node.querySelectorAll("tr")).filter((row) => row.closest("table") === node);
+    if (!groupedRows.length) {
+      return "";
+    }
+
+    const matrix = [];
+    let headerAlignments = [];
+
+    for (const row of groupedRows) {
+      const cells = getDirectElementChildren(row).filter((cell) => {
+        const tag = cell.tagName.toLowerCase();
+        return tag === "th" || tag === "td";
+      });
+      if (!cells.length) {
+        return serializeHtmlNode(node);
+      }
+      if (cells.some((cell) => cell.getAttribute("rowspan") || cell.getAttribute("colspan"))) {
+        return serializeHtmlNode(node);
+      }
+      if (cells.some((cell) => hasComplexBlockContent(cell))) {
+        return serializeHtmlNode(node);
+      }
+
+      const rowValues = cells.map((cell) => convertTableCellContent(cell, context));
+
+      if (!headerAlignments.length) {
+        headerAlignments = cells.map((cell) => getTableCellAlignment(cell));
+      }
+      matrix.push(rowValues);
+    }
+
+    if (!matrix.length) {
+      return "";
+    }
+
+    const columnCount = matrix[0].length;
+    if (!matrix.every((row) => row.length === columnCount)) {
+      return serializeHtmlNode(node);
+    }
+
+    const header = matrix[0];
+    const body = matrix.slice(1);
+    const separator = header.map((_, index) => {
+      const alignment = headerAlignments[index] || "";
+      if (alignment === "left") {
+        return ":---";
+      }
+      if (alignment === "center") {
+        return ":---:";
+      }
+      if (alignment === "right") {
+        return "---:";
+      }
+      return "---";
+    });
+
+    const lines = [
+      `| ${header.join(" | ")} |`,
+      `| ${separator.join(" | ")} |`
+    ];
+
+    body.forEach((row) => {
+      lines.push(`| ${row.join(" | ")} |`);
+    });
+
+    return lines.join("\n");
+  }
+
+  function convertDefinitionList(node, context) {
+    const children = getDirectElementChildren(node);
+    if (!children.length) {
+      return "";
+    }
+
+    const lines = [];
+    let currentTerms = [];
+    let hasSeenDefinition = false;
+
+    const flushTerms = (definition) => {
+      const terms = currentTerms.filter(Boolean);
+      if (!terms.length || !definition) {
+        return;
+      }
+      lines.push(`${terms.join(", ")}\n: ${definition}`);
+      hasSeenDefinition = true;
+    };
+
+    for (const child of children) {
+      const tag = child.tagName.toLowerCase();
+      if (tag === "dt") {
+        if (hasSeenDefinition) {
+          currentTerms = [];
+          hasSeenDefinition = false;
+        }
+        const term = convertInlineChildren(child, context).trim();
+        if (term) {
+          currentTerms.push(term);
+        }
+        continue;
+      }
+      if (tag === "dd") {
+        if (hasComplexBlockContent(child)) {
+          return serializeHtmlNode(node);
+        }
+        const definition = convertInlineChildren(child, context).trim();
+        flushTerms(definition);
+        continue;
+      }
+      return serializeHtmlNode(node);
+    }
+
+    if (!lines.length) {
+      return "";
+    }
+
+    return lines.join("\n\n");
+  }
+
+  function convertFigure(node, context) {
+    const children = getDirectElementChildren(node);
+    const figcaption = children.find((child) => child.tagName.toLowerCase() === "figcaption");
+    const contentChildren = children.filter((child) => child.tagName.toLowerCase() !== "figcaption");
+
+    if (!contentChildren.length) {
+      return serializeHtmlNode(node);
+    }
+    if (contentChildren.length !== 1) {
+      return serializeHtmlNode(node);
+    }
+    if (hasComplexBlockContent(contentChildren[0])) {
+      return serializeHtmlNode(node);
+    }
+
+    const primary = contentChildren[0];
+    const body =
+      primary.tagName.toLowerCase() === "img" ? convertInlineNode(primary, context).trim() : convertNode(primary, context).trim();
+    if (!body) {
+      return serializeHtmlNode(node);
+    }
+
+    if (!figcaption) {
+      return body;
+    }
+
+    const caption = convertInlineChildren(figcaption, context).trim();
+    if (!caption) {
+      return body;
+    }
+
+    return `${body}\n\n${caption}`;
+  }
+
+  function convertDetails(node, context) {
+    const children = getDirectElementChildren(node);
+    if (!children.length) {
+      return "";
+    }
+
+    const summary = children.find((child) => child.tagName.toLowerCase() === "summary");
+    const summaryText = summary ? convertInlineChildren(summary, context).trim() : "";
+    const content = children
+      .filter((child) => child !== summary)
+      .map((child) => convertNode(child, context))
+      .filter(Boolean)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (!summaryText && !content.length) {
+      return "";
+    }
+    if (!summaryText) {
+      return content.join("\n\n");
+    }
+    if (!content.length) {
+      return `**${summaryText}**`;
+    }
+
+    return [`**${summaryText}**`, ...content].join("\n\n");
+  }
+
   function getDocumentBaseUrl() {
     if (document && typeof document.baseURI === "string" && document.baseURI) {
       return document.baseURI;
@@ -1507,7 +1796,7 @@
       return "";
     }
     if (tag === "br") {
-      return "\n";
+      return context.tableCell ? "<br>" : "\n";
     }
     if (tag === "strong" || tag === "b") {
       const content = convertInlineChildren(node, context).trim();
@@ -1555,6 +1844,24 @@
     }
     if (tag === "select") {
       return formatSelectValue(node);
+    }
+    if (tag === "sup" || tag === "sub" || tag === "kbd") {
+      const content = convertInlineChildren(node, context).trim();
+      return content ? `<${tag}>${content}</${tag}>` : "";
+    }
+    if (tag === "abbr") {
+      const title = node.getAttribute("title");
+      const content = convertInlineChildren(node, context).trim();
+      if (!content) {
+        return "";
+      }
+      if (!title) {
+        return content;
+      }
+      return `<abbr title="${escapeHtmlAttribute(title)}">${content}</abbr>`;
+    }
+    if (tag === "mark") {
+      return convertInlineChildren(node, context);
     }
     return convertInlineChildren(node, context);
   }
@@ -1692,6 +1999,18 @@
     if (tag === "pre") {
       const content = node.textContent || "";
       return `\`\`\`\n${content.replace(/\n$/, "")}\n\`\`\``;
+    }
+    if (tag === "table") {
+      return convertTable(node, context);
+    }
+    if (tag === "figure") {
+      return convertFigure(node, context);
+    }
+    if (tag === "dl") {
+      return convertDefinitionList(node, context);
+    }
+    if (tag === "details") {
+      return convertDetails(node, context);
     }
     if (tag === "blockquote") {
       const content = convertBlockChildren(node, context);
