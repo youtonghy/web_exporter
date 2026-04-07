@@ -1877,6 +1877,26 @@
     return blocks.join("\n\n");
   }
 
+  function indentMarkdownBlock(text, indent) {
+    const prefix = indent || "";
+    return String(text || "")
+      .split("\n")
+      .map((line, index) => {
+        if (index === 0 || !line) {
+          return line;
+        }
+        return `${prefix}${line}`;
+      })
+      .join("\n");
+  }
+
+  function quoteMarkdownBlock(text) {
+    return String(text || "")
+      .split("\n")
+      .map((line) => (line ? `> ${line}` : ">"))
+      .join("\n");
+  }
+
   function convertListItem(node, context) {
     const blocks = [];
     const inlineParts = [];
@@ -1936,7 +1956,7 @@
       }
     }
 
-    return blocks.join("\n");
+    return blocks.join("\n\n");
   }
 
   function convertList(node, context) {
@@ -1959,7 +1979,7 @@
       }
       const indent = "  ".repeat(context.listDepth || 0);
       const prefix = ordered ? `${index}. ` : "- ";
-      const indentedContent = content.replace(/\n/g, `\n${indent}  `);
+      const indentedContent = indentMarkdownBlock(content, `${indent}  `);
       lines.push(`${indent}${prefix}${indentedContent}`);
       index += 1;
     });
@@ -2017,10 +2037,7 @@
       if (!content) {
         return "";
       }
-      return content
-        .split("\n")
-        .map((line) => (line ? `> ${line}` : ">"))
-        .join("\n");
+      return quoteMarkdownBlock(content);
     }
     if (tag === "ul" || tag === "ol") {
       return convertList(node, context);

@@ -462,6 +462,27 @@ function createInlineHtmlFormattingBlock() {
   ]);
 }
 
+function createNestedListBlock() {
+  return el("ul", {}, [
+    el("li", {}, [
+      el("p", {}, [text("Parent")]),
+      el("ul", {}, [
+        el("li", {}, [text("Child 1")]),
+        el("li", {}, [text("Child 2")])
+      ])
+    ])
+  ]);
+}
+
+function createMixedBlockquote() {
+  const codeBlock = createPlainPreBlock().root;
+  return el("blockquote", {}, [
+    el("p", {}, [text("Intro")]),
+    el("ul", {}, [el("li", {}, [text("Nested item")])]),
+    codeBlock
+  ]);
+}
+
 test("resolves clicks inside KaTeX display math to the display root", () => {
   const hooks = loadContentHooks();
   const formula = createDisplayMath("A = [4, 7, 1, 9, 3]", "A");
@@ -661,6 +682,26 @@ test("preserves sup sub and kbd tags inline", () => {
   const block = createInlineHtmlFormattingBlock();
 
   assert.equal(hooks.elementToMarkdown(block), "x<sup>2</sup> and <sub>i</sub> <kbd>Esc</kbd>");
+});
+
+test("keeps nested lists separated from surrounding text blocks", () => {
+  const hooks = loadContentHooks();
+  const list = createNestedListBlock();
+
+  assert.equal(
+    hooks.elementToMarkdown(list),
+    "- Parent\n\n    - Child 1\n    - Child 2"
+  );
+});
+
+test("prefixes every line in blockquotes with markdown quote markers", () => {
+  const hooks = loadContentHooks();
+  const quote = createMixedBlockquote();
+
+  assert.equal(
+    hooks.elementToMarkdown(quote),
+    "> Intro\n>\n> - Nested item\n>\n> ```\n> for i in range(n):\n>     print(i)\n> ```"
+  );
 });
 
 test("treats custom container elements with block children as block wrappers", () => {
