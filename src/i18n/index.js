@@ -33,6 +33,7 @@
       "option.png": "PNG",
       "toggle.preserve_styles": "Preserve styles",
       "toggle.enhanced_images": "Enhanced image loading mode",
+      "toggle.markdown_image_package": "Package images into zip",
       "button.select_export": "Select element and export",
       "hint.select_element": "Click the button, then pick an element on the page. Press Esc to cancel.",
       "overlay.select_prompt": "Click to select an element, Esc to cancel",

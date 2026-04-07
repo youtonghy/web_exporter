@@ -56,6 +56,7 @@
   let preserveStyles = true;
   let exportFormat = "pdf";
   let enhancedImageLoading = false;
+  let markdownImagePackage = false;
   let lastHighlighted = null;
   let overlay = null;
 
@@ -208,13 +209,14 @@
     return mathRoot || element;
   }
 
-  function startSelection(keepStyles, format, enhancedImages) {
+  function startSelection(keepStyles, format, enhancedImages, markdownPackage) {
     if (selecting) {
       return;
     }
     preserveStyles = Boolean(keepStyles);
     exportFormat = format === "markdown" ? "markdown" : format === "png" ? "png" : "pdf";
     enhancedImageLoading = Boolean(enhancedImages);
+    markdownImagePackage = Boolean(markdownPackage);
     selecting = true;
     ensureStyleTag();
     createOverlay();
@@ -262,7 +264,9 @@
 
     stopSelection();
     if (exportFormat === "markdown") {
-      exportElementToMarkdown(target);
+      exportElementToMarkdown(target).catch((error) => {
+        console.error(error);
+      });
     } else if (exportFormat === "png") {
       exportElementToPng(target);
     } else {
@@ -453,6 +457,299 @@
       .replace(/[ \t]+\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+  }
+
+  function getDocumentBaseUrl() {
+    if (document && typeof document.baseURI === "string" && document.baseURI) {
+      return document.baseURI;
+    }
+    if (window && window.location && typeof window.location.href === "string" && window.location.href) {
+      return window.location.href;
+    }
+    return "https://example.invalid/";
+  }
+
+  function resolveAbsoluteUrl(url) {
+    const value = (url || "").trim();
+    if (!value) {
+      return "";
+    }
+    if (/^data:/i.test(value)) {
+      return value;
+    }
+    try {
+      return new URL(value, getDocumentBaseUrl()).href;
+    } catch (error) {
+      return value;
+    }
+  }
+
+  function buildMarkdownAssetToken(index) {
+    return `__WEB_EXPORTER_IMAGE_${index}__`;
+  }
+
+  function collectMarkdownAsset(node, context) {
+    const source = resolveAbsoluteUrl(node.currentSrc || getAttributeValue(node, "src") || getAttributeValue(node, "data-src"));
+    if (!source) {
+      return null;
+    }
+
+    const existing = context.assetMap.get(source);
+    if (existing) {
+      return existing;
+    }
+
+    const asset = {
+      id: context.assets.length + 1,
+      token: buildMarkdownAssetToken(context.assets.length + 1),
+      source,
+      originalSource: source
+    };
+    context.assets.push(asset);
+    context.assetMap.set(source, asset);
+    return asset;
+  }
+
+  function createMarkdownContext(options = {}) {
+    return {
+      listDepth: 0,
+      imagePackaging: Boolean(options.imagePackaging),
+      assets: [],
+      assetMap: new Map()
+    };
+  }
+
+  function applyMarkdownAssetUrls(markdown, resolvedAssets) {
+    let output = markdown;
+    resolvedAssets.forEach((asset) => {
+      output = output.split(asset.token).join(asset.outputPath || asset.originalSource || "");
+    });
+    return output;
+  }
+
+  function base64ToBytes(value) {
+    const binary =
+      typeof atob === "function"
+        ? atob(value)
+        : typeof Buffer !== "undefined"
+          ? Buffer.from(value, "base64").toString("binary")
+          : "";
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function parseDataUrlAsset(url) {
+    const match = /^data:([^;,]+)?(?:;charset=[^;,]+)?(;base64)?,(.*)$/i.exec(url || "");
+    if (!match) {
+      throw new Error("Invalid data URL");
+    }
+    const mimeType = (match[1] || "application/octet-stream").toLowerCase();
+    const payload = match[3] || "";
+    if (match[2]) {
+      return {
+        bytes: base64ToBytes(payload),
+        contentType: mimeType,
+        finalUrl: url
+      };
+    }
+    return {
+      bytes: new TextEncoder().encode(decodeURIComponent(payload)),
+      contentType: mimeType,
+      finalUrl: url
+    };
+  }
+
+  function getExtensionFromContentType(contentType) {
+    const normalized = (contentType || "").split(";")[0].trim().toLowerCase();
+    if (!normalized) {
+      return "";
+    }
+    const table = {
+      "image/apng": "apng",
+      "image/avif": "avif",
+      "image/gif": "gif",
+      "image/jpeg": "jpg",
+      "image/jpg": "jpg",
+      "image/png": "png",
+      "image/svg+xml": "svg",
+      "image/webp": "webp",
+      "image/bmp": "bmp"
+    };
+    return table[normalized] || "";
+  }
+
+  function getExtensionFromUrl(url) {
+    try {
+      const pathname = new URL(url, getDocumentBaseUrl()).pathname;
+      const match = pathname.match(/\.([a-z0-9]{2,8})$/i);
+      return match ? match[1].toLowerCase() : "";
+    } catch (error) {
+      const match = (url || "").match(/\.([a-z0-9]{2,8})(?:$|[?#])/i);
+      return match ? match[1].toLowerCase() : "";
+    }
+  }
+
+  function padImageNumber(value) {
+    return String(value).padStart(3, "0");
+  }
+
+  async function fetchMarkdownAssetBytes(url) {
+    if (/^data:/i.test(url)) {
+      return parseDataUrlAsset(url);
+    }
+
+    const response = await sendRuntimeMessage({
+      type: "FETCH_EXPORT_ASSET",
+      url
+    });
+    if (!response || !response.ok) {
+      const message = response && response.error ? response.error : `Asset request failed: ${url}`;
+      throw new Error(message);
+    }
+    return {
+      bytes: new Uint8Array(response.bytes || []),
+      contentType: response.contentType || "",
+      finalUrl: response.finalUrl || url
+    };
+  }
+
+  async function resolveMarkdownPackagingAssets(assets) {
+    const resolved = [];
+    let imageIndex = 1;
+
+    for (const asset of assets) {
+      try {
+        const payload = await fetchMarkdownAssetBytes(asset.source);
+        const extension =
+          getExtensionFromContentType(payload.contentType) ||
+          getExtensionFromUrl(payload.finalUrl) ||
+          getExtensionFromUrl(asset.source) ||
+          "bin";
+        const fileName = `image-${padImageNumber(imageIndex)}.${extension}`;
+        imageIndex += 1;
+        resolved.push({
+          ...asset,
+          bytes: payload.bytes,
+          fileName,
+          outputPath: `images/${fileName}`
+        });
+      } catch (error) {
+        resolved.push({
+          ...asset,
+          outputPath: asset.originalSource
+        });
+      }
+    }
+
+    return resolved;
+  }
+
+  function getDosDateParts(date = new Date()) {
+    const year = Math.max(1980, date.getFullYear());
+    const dosTime =
+      ((date.getHours() & 0x1f) << 11) |
+      ((date.getMinutes() & 0x3f) << 5) |
+      Math.floor((date.getSeconds() || 0) / 2);
+    const dosDate = (((year - 1980) & 0x7f) << 9) | (((date.getMonth() + 1) & 0x0f) << 5) | (date.getDate() & 0x1f);
+    return { dosTime, dosDate };
+  }
+
+  function makeCrc32Table() {
+    const table = new Uint32Array(256);
+    for (let i = 0; i < 256; i += 1) {
+      let current = i;
+      for (let bit = 0; bit < 8; bit += 1) {
+        current = current & 1 ? 0xedb88320 ^ (current >>> 1) : current >>> 1;
+      }
+      table[i] = current >>> 0;
+    }
+    return table;
+  }
+
+  const CRC32_TABLE = makeCrc32Table();
+
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    for (let i = 0; i < bytes.length; i += 1) {
+      crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function createZipBlob(entries) {
+    const encoder = new TextEncoder();
+    const localParts = [];
+    const centralParts = [];
+    const { dosTime, dosDate } = getDosDateParts();
+    let offset = 0;
+
+    entries.forEach((entry) => {
+      const nameBytes = encoder.encode(entry.name);
+      const dataBytes = entry.data instanceof Uint8Array ? entry.data : new Uint8Array(entry.data);
+      const checksum = crc32(dataBytes);
+
+      const localHeader = new Uint8Array(30 + nameBytes.length);
+      const localView = new DataView(localHeader.buffer);
+      localView.setUint32(0, 0x04034b50, true);
+      localView.setUint16(4, 20, true);
+      localView.setUint16(6, 0x0800, true);
+      localView.setUint16(8, 0, true);
+      localView.setUint16(10, dosTime, true);
+      localView.setUint16(12, dosDate, true);
+      localView.setUint32(14, checksum, true);
+      localView.setUint32(18, dataBytes.length, true);
+      localView.setUint32(22, dataBytes.length, true);
+      localView.setUint16(26, nameBytes.length, true);
+      localView.setUint16(28, 0, true);
+      localHeader.set(nameBytes, 30);
+
+      const centralHeader = new Uint8Array(46 + nameBytes.length);
+      const centralView = new DataView(centralHeader.buffer);
+      centralView.setUint32(0, 0x02014b50, true);
+      centralView.setUint16(4, 20, true);
+      centralView.setUint16(6, 20, true);
+      centralView.setUint16(8, 0x0800, true);
+      centralView.setUint16(10, 0, true);
+      centralView.setUint16(12, dosTime, true);
+      centralView.setUint16(14, dosDate, true);
+      centralView.setUint32(16, checksum, true);
+      centralView.setUint32(20, dataBytes.length, true);
+      centralView.setUint32(24, dataBytes.length, true);
+      centralView.setUint16(28, nameBytes.length, true);
+      centralView.setUint16(30, 0, true);
+      centralView.setUint16(32, 0, true);
+      centralView.setUint16(34, 0, true);
+      centralView.setUint16(36, 0, true);
+      centralView.setUint32(38, 0, true);
+      centralView.setUint32(42, offset, true);
+      centralHeader.set(nameBytes, 46);
+
+      localParts.push(localHeader, dataBytes);
+      centralParts.push(centralHeader);
+      offset += localHeader.length + dataBytes.length;
+    });
+
+    const centralDirectoryOffset = offset;
+    let centralDirectorySize = 0;
+    centralParts.forEach((part) => {
+      centralDirectorySize += part.length;
+    });
+
+    const endRecord = new Uint8Array(22);
+    const endView = new DataView(endRecord.buffer);
+    endView.setUint32(0, 0x06054b50, true);
+    endView.setUint16(4, 0, true);
+    endView.setUint16(6, 0, true);
+    endView.setUint16(8, entries.length, true);
+    endView.setUint16(10, entries.length, true);
+    endView.setUint32(12, centralDirectorySize, true);
+    endView.setUint32(16, centralDirectoryOffset, true);
+    endView.setUint16(20, 0, true);
+
+    return new Blob([...localParts, ...centralParts, endRecord], { type: "application/zip" });
   }
 
   function isIgnorableTag(tag) {
@@ -1237,11 +1534,18 @@
         return "";
       }
       const alt = escapeMarkdownText(node.getAttribute("alt") || "");
-      const src = node.getAttribute("src") || "";
+      const src = resolveAbsoluteUrl(node.currentSrc || getAttributeValue(node, "src") || getAttributeValue(node, "data-src"));
       if (!src) {
         return alt;
       }
-      return `![${alt}](${src})`;
+      if (!context.imagePackaging) {
+        return `![${alt}](${src})`;
+      }
+      const asset = collectMarkdownAsset(node, context);
+      if (!asset) {
+        return alt;
+      }
+      return `![${alt}](${asset.token})`;
     }
     if (tag === "input") {
       return formatInputValue(node);
@@ -1417,9 +1721,17 @@
     return convertInlineChildren(node, context).trim();
   }
 
+  function collectMarkdownExport(root, options = {}) {
+    const context = createMarkdownContext(options);
+    const content = convertNode(root, context);
+    return {
+      markdown: normalizeMarkdown(content),
+      assets: context.assets.slice()
+    };
+  }
+
   function elementToMarkdown(root) {
-    const content = convertNode(root, { listDepth: 0 });
-    return normalizeMarkdown(content);
+    return collectMarkdownExport(root).markdown;
   }
 
   function sanitizeFilename(name) {
@@ -1455,6 +1767,32 @@
       URL.revokeObjectURL(url);
       anchor.remove();
     }, 0);
+  }
+
+  async function exportMarkdownImagePackage(target) {
+    const baseName = sanitizeFilename(document.title);
+    const markdownFileName = `${baseName}.md`;
+    const zipFileName = `${baseName}.zip`;
+    const collected = collectMarkdownExport(target, { imagePackaging: true });
+    const resolvedAssets = await resolveMarkdownPackagingAssets(collected.assets);
+    const markdown = applyMarkdownAssetUrls(collected.markdown, resolvedAssets);
+    const entries = [
+      {
+        name: markdownFileName,
+        data: new TextEncoder().encode(markdown)
+      }
+    ];
+
+    resolvedAssets.forEach((asset) => {
+      if (asset.bytes && asset.fileName) {
+        entries.push({
+          name: `images/${asset.fileName}`,
+          data: asset.bytes
+        });
+      }
+    });
+
+    downloadBlob(createZipBlob(entries), zipFileName);
   }
 
   function sendRuntimeMessage(message) {
@@ -2532,7 +2870,12 @@
     }
   }
 
-  function exportElementToMarkdown(target) {
+  async function exportElementToMarkdown(target) {
+    if (markdownImagePackage) {
+      await exportMarkdownImagePackage(target);
+      return;
+    }
+
     const markdown = elementToMarkdown(target);
     const filename = `${sanitizeFilename(document.title)}.md`;
     downloadMarkdown(markdown, filename);
@@ -2542,9 +2885,13 @@
     globalThis.__WEB_EXPORTER_TEST_HOOKS__ = {
       applyEdAmberCodeBlockFormatting,
       applyEdPrintPairOverrides,
+      applyMarkdownAssetUrls,
       applyGenericCodeBlockFormatting,
       applyPrintVisibilityOverrides,
+      collectMarkdownExport,
       convertMathNode,
+      createZipBlob,
+      crc32,
       formatCodeBlock,
       detectMathDisplayMode,
       elementToMarkdown,
@@ -2562,6 +2909,7 @@
       isMathRoot,
       isCodeBlockRoot,
       prepareMountedPrintRoot,
+      resolveMarkdownPackagingAssets,
       resolveSelectableTarget
     };
   }
@@ -2576,7 +2924,12 @@
       }
 
       if (message.type === "START_SELECTION") {
-        startSelection(message.preserveStyles, message.exportFormat, message.enhancedImageLoading);
+        startSelection(
+          message.preserveStyles,
+          message.exportFormat,
+          message.enhancedImageLoading,
+          message.markdownImagePackage
+        );
         if (typeof sendResponse === "function") {
           sendResponse({ ok: true });
         }

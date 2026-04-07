@@ -2,6 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { TextEncoder } = require("node:util");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
@@ -181,6 +182,8 @@ function loadContentHooks() {
     clearTimeout,
     Blob,
     URL,
+    TextEncoder,
+    Buffer,
     Node: { ELEMENT_NODE: 1, TEXT_NODE: 3 },
     Element: MockElement,
     HTMLInputElement: MockHTMLInputElement,
@@ -407,6 +410,50 @@ test("resolves clicks inside KaTeX display math to the display root", () => {
     hooks.elementToMarkdown(hooks.resolveSelectableTarget(formula.visibleLeaf)),
     "$$\nA = [4, 7, 1, 9, 3]\n$$"
   );
+});
+
+test("collects markdown image assets and rewrites paths for package mode", async () => {
+  const hooks = loadContentHooks();
+  const root = el("p", {}, [text("Look "), el("img", { alt: "diagram", src: "data:image/png;base64,AQID" })]);
+  const collected = hooks.collectMarkdownExport(root, { imagePackaging: true });
+
+  assert.equal(collected.assets.length, 1);
+  assert.equal(collected.markdown, "Look ![diagram](__WEB_EXPORTER_IMAGE_1__)");
+
+  const resolved = await hooks.resolveMarkdownPackagingAssets(collected.assets);
+  assert.equal(resolved[0].outputPath, "images/image-001.png");
+  assert.deepEqual(Array.from(resolved[0].bytes), [1, 2, 3]);
+
+  assert.equal(
+    hooks.applyMarkdownAssetUrls(collected.markdown, resolved),
+    "Look ![diagram](images/image-001.png)"
+  );
+});
+
+test("deduplicates repeated image urls in package mode", () => {
+  const hooks = loadContentHooks();
+  const shared = "https://example.com/shared.png";
+  const root = el("div", {}, [
+    el("img", { alt: "one", src: shared }),
+    el("p", {}, [el("img", { alt: "two", src: shared })])
+  ]);
+
+  const collected = hooks.collectMarkdownExport(root, { imagePackaging: true });
+
+  assert.equal(collected.assets.length, 1);
+  assert.match(collected.markdown, /__WEB_EXPORTER_IMAGE_1__/);
+});
+
+test("creates a valid zip blob for markdown image packages", async () => {
+  const hooks = loadContentHooks();
+  const zipBlob = hooks.createZipBlob([
+    { name: "note.md", data: new TextEncoder().encode("# Title\n") },
+    { name: "images/image-001.png", data: new Uint8Array([1, 2, 3, 4]) }
+  ]);
+  const bytes = new Uint8Array(await zipBlob.arrayBuffer());
+
+  assert.equal(zipBlob.type, "application/zip");
+  assert.deepEqual(Array.from(bytes.slice(0, 4)), [0x50, 0x4b, 0x03, 0x04]);
 });
 
 test("exports mixed block and inline math without duplicating KaTeX visible text", () => {

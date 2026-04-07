@@ -2,6 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { TextEncoder } = require("node:util");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
@@ -260,6 +261,8 @@ function createTestContext() {
     clearTimeout,
     Blob,
     URL,
+    TextEncoder,
+    Buffer,
     Node: { ELEMENT_NODE: 1, TEXT_NODE: 3 },
     Element: MockElement,
     HTMLInputElement: MockHTMLInputElement,

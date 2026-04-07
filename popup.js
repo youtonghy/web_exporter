@@ -8,9 +8,12 @@ const preserveToggle = document.getElementById("preserveStyles");
 const preserveRow = document.getElementById("preserveStylesRow");
 const enhancedToggle = document.getElementById("enhancedImageLoading");
 const enhancedRow = document.getElementById("enhancedImageLoadingRow");
+const markdownPackageToggle = document.getElementById("markdownImagePackage");
+const markdownPackageRow = document.getElementById("markdownImagePackageRow");
 const selectButton = document.getElementById("selectAndExport");
 let lastPreserveValue = preserveToggle.checked;
 let lastEnhancedValue = enhancedToggle.checked;
+let lastMarkdownPackageValue = markdownPackageToggle.checked;
 
 applyTranslations(document);
 document.documentElement.lang = getLocale();
@@ -70,11 +73,23 @@ function sendMessage(tabId, message) {
 
 function injectContentScript(tabId) {
   if (api.scripting && api.scripting.executeScript) {
+    return injectScriptFiles(tabId, ["src/i18n/index.js", "content.js"]);
+  }
+
+  if (api.tabs && api.tabs.executeScript) {
+    return injectScriptFiles(tabId, ["src/i18n/index.js", "content.js"]);
+  }
+
+  return Promise.reject(new Error(t("error.scripting_unavailable")));
+}
+
+function executeScriptFile(tabId, file) {
+  if (api.scripting && api.scripting.executeScript) {
     return new Promise((resolve, reject) => {
       api.scripting.executeScript(
         {
           target: { tabId },
-          files: ["content.js"]
+          files: [file]
         },
         () => {
           const err = api.runtime && api.runtime.lastError;
@@ -90,7 +105,7 @@ function injectContentScript(tabId) {
 
   if (api.tabs && api.tabs.executeScript) {
     return new Promise((resolve, reject) => {
-      api.tabs.executeScript(tabId, { file: "content.js" }, () => {
+      api.tabs.executeScript(tabId, { file }, () => {
         const err = api.runtime && api.runtime.lastError;
         if (err) {
           reject(err);
@@ -102,6 +117,12 @@ function injectContentScript(tabId) {
   }
 
   return Promise.reject(new Error(t("error.scripting_unavailable")));
+}
+
+async function injectScriptFiles(tabId, files) {
+  for (const file of files) {
+    await executeScriptFile(tabId, file);
+  }
 }
 
 function updateFormatUI() {
@@ -116,6 +137,10 @@ function updateFormatUI() {
     enhancedToggle.checked = false;
     enhancedToggle.disabled = true;
     enhancedRow.classList.add("is-disabled");
+
+    markdownPackageToggle.disabled = false;
+    markdownPackageToggle.checked = lastMarkdownPackageValue;
+    markdownPackageRow.classList.remove("is-disabled");
   } else if (isPng) {
     lastPreserveValue = preserveToggle.checked;
     preserveToggle.checked = false;
@@ -125,6 +150,11 @@ function updateFormatUI() {
     enhancedToggle.disabled = false;
     enhancedRow.classList.remove("is-disabled");
     enhancedToggle.checked = lastEnhancedValue;
+
+    lastMarkdownPackageValue = markdownPackageToggle.checked;
+    markdownPackageToggle.checked = false;
+    markdownPackageToggle.disabled = true;
+    markdownPackageRow.classList.add("is-disabled");
   } else {
     preserveToggle.disabled = false;
     preserveRow.classList.remove("is-disabled");
@@ -132,6 +162,11 @@ function updateFormatUI() {
     enhancedToggle.disabled = false;
     enhancedRow.classList.remove("is-disabled");
     enhancedToggle.checked = lastEnhancedValue;
+
+    lastMarkdownPackageValue = markdownPackageToggle.checked;
+    markdownPackageToggle.checked = false;
+    markdownPackageToggle.disabled = true;
+    markdownPackageRow.classList.add("is-disabled");
   }
 }
 
@@ -153,7 +188,8 @@ selectButton.addEventListener("click", async () => {
       type: "START_SELECTION",
       preserveStyles: preserveToggle.checked,
       exportFormat: formatSelect.value,
-      enhancedImageLoading: enhancedToggle.checked
+      enhancedImageLoading: enhancedToggle.checked,
+      markdownImagePackage: markdownPackageToggle.checked
     };
 
     try {
