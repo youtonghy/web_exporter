@@ -2480,6 +2480,26 @@
     expandScrollableElements(mountedRoot);
   }
 
+  // A4 portrait at 96 dpi: 210mm × 297mm = ~794px × ~1123px
+  const PDF_PAGE_WIDTH_PX = 794;
+  const PDF_PAGE_HEIGHT_PX = 1123;
+  // Minimum zoom prevents content from becoming unreadably small.
+  // At 0.5, content up to ~2 pages tall can still fit on one page.
+  const PDF_MIN_ZOOM = 0.5;
+
+  function computeFitToPageZoom(element) {
+    if (!isElementNode(element)) {
+      return 1;
+    }
+    const contentW = element.scrollWidth;
+    const contentH = element.scrollHeight;
+    if (!contentW || !contentH) {
+      return 1;
+    }
+    const scale = Math.min(PDF_PAGE_WIDTH_PX / contentW, PDF_PAGE_HEIGHT_PX / contentH, 1);
+    return Math.max(scale, PDF_MIN_ZOOM);
+  }
+
   function buildPrintPayload(target, keepStyles, enhancedImages) {
     const clone = target.cloneNode(true);
     prepareClone(target, clone, {
@@ -2491,8 +2511,8 @@
 
     const baseHref = document.baseURI || location.href;
     const bodyStyle = keepStyles
-      ? "margin:0;padding:16px;background:#ffffff;"
-      : "margin:0;padding:16px;font-family:Arial, sans-serif;background:#ffffff;";
+      ? "margin:0;padding:0;background:#ffffff;"
+      : "margin:0;padding:0;font-family:Arial, sans-serif;background:#ffffff;";
 
     return { clone, baseHref, bodyStyle, sourceRoot: target };
   }
@@ -2525,8 +2545,9 @@
 
     const style = doc.createElement("style");
     style.textContent = `
-      @page { margin: 12mm; }
-      body { ${bodyStyle} }
+      @page { size: A4 portrait; margin: 0; }
+      html, body { margin: 0 !important; padding: 0 !important; }
+      body { ${bodyStyle} display: block !important; max-width: none !important; }
       * { box-sizing: border-box; }
     `;
     doc.head.appendChild(style);
@@ -2565,6 +2586,12 @@
     const schedulePrint = () => {
       const printableRoot = isElementNode(importedRoot) ? importedRoot : doc.body.firstElementChild || doc.body;
       waitForPrintAssets(printableRoot, doc, payload.sourceRoot, enhancedImages).finally(() => {
+        if (isElementNode(printableRoot)) {
+          const zoom = computeFitToPageZoom(printableRoot);
+          if (zoom < 1) {
+            printableRoot.style.zoom = String(zoom);
+          }
+        }
         setTimeout(triggerPrint, 50);
       });
     };
@@ -2672,7 +2699,15 @@
 
     style.textContent = `
       ${resetRules}
+      @page { size: A4 portrait; margin: 0; }
       @media print {
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          display: block !important;
+          max-width: none !important;
+          overflow: visible !important;
+        }
         body > *:not(#${PRINT_CONTAINER_ID}) {
           display: none !important;
         }
@@ -2694,6 +2729,10 @@
 
     window.addEventListener("afterprint", cleanup, { once: true });
     await waitForPrintAssets(clone, document, target, enhancedImages);
+    const zoom = computeFitToPageZoom(clone);
+    if (zoom < 1) {
+      clone.style.zoom = String(zoom);
+    }
     window.print();
   }
 
