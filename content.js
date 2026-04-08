@@ -2495,9 +2495,19 @@
     element.style.height = "";
     element.style.minHeight = "";
     element.style.marginLeft = "0";
+    // Add 1px padding-bottom to prevent margin collapsing between the element
+    // and its last child — collapsed margins are excluded from scrollHeight,
+    // causing the measured height to be too small and content to overflow onto
+    // a second page.  The padding stays in place during printing for consistency.
+    element.style.paddingBottom = "1px";
+    // Temporarily set overflow:hidden so scrollHeight also captures any
+    // margin-bottom on the last child that would otherwise collapse.
+    const prevOverflow = element.style.overflow;
+    element.style.overflow = "hidden";
     void element.offsetHeight; // flush layout before measuring
     const contentW = element.scrollWidth;
     const contentH = element.scrollHeight;
+    element.style.overflow = prevOverflow;
     if (!contentW || !contentH) {
       return;
     }
