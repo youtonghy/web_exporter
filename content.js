@@ -2480,10 +2480,17 @@
     expandScrollableElements(mountedRoot);
   }
 
-  // Dynamically sets @page size to match content dimensions, producing a
-  // single-page PDF as tall as the content rather than paginating across
-  // multiple A4 sheets.  styleEl must be the <style> element that already
-  // contains the @page rule so we can overwrite it in-place.
+  const PDF_PAGE_WIDTH_PX = 1123;
+  const PDF_PAGE_HEIGHT_PX = 794;
+
+  function buildPdfPageRule(heightPx = PDF_PAGE_HEIGHT_PX) {
+    return `@page { size: ${PDF_PAGE_WIDTH_PX}px ${Math.max(Math.ceil(Number(heightPx) || 0), PDF_PAGE_HEIGHT_PX)}px; margin: 0; }`;
+  }
+
+  // Keeps the PDF width fixed to a landscape A4 page while stretching the
+  // page height to fit the exported content onto a single sheet when possible.
+  // styleEl must be the <style> element that already contains the @page rule
+  // so we can overwrite it in-place.
   function applyDynamicPageSize(element, styleEl) {
     if (!isElementNode(element) || !styleEl) {
       return;
@@ -2495,6 +2502,8 @@
     element.style.height = "";
     element.style.minHeight = "";
     element.style.marginLeft = "0";
+    element.style.maxWidth = `${PDF_PAGE_WIDTH_PX}px`;
+    element.style.boxSizing = "border-box";
     // Add 1px padding-bottom to prevent margin collapsing between the element
     // and its last child — collapsed margins are excluded from scrollHeight,
     // causing the measured height to be too small and content to overflow onto
@@ -2511,10 +2520,10 @@
     if (!contentW || !contentH) {
       return;
     }
-    styleEl.textContent = styleEl.textContent.replace(
-      /@page\s*\{[^}]*\}/,
-      `@page { size: ${contentW}px ${contentH}px; margin: 0; }`
-    );
+    const pageRule = buildPdfPageRule(contentH);
+    styleEl.textContent = /@page\s*\{[^}]*\}/.test(styleEl.textContent)
+      ? styleEl.textContent.replace(/@page\s*\{[^}]*\}/, pageRule)
+      : `${pageRule}\n${styleEl.textContent}`;
   }
 
   function buildPrintPayload(target, keepStyles, enhancedImages) {
@@ -2562,9 +2571,15 @@
 
     const style = doc.createElement("style");
     style.textContent = `
-      @page { size: A4 portrait; margin: 0; }
+      ${buildPdfPageRule()}
       html, body { margin: 0 !important; padding: 0 !important; }
-      body { ${bodyStyle} display: block !important; max-width: none !important; }
+      body {
+        ${bodyStyle}
+        display: block !important;
+        width: ${PDF_PAGE_WIDTH_PX}px !important;
+        min-width: ${PDF_PAGE_WIDTH_PX}px !important;
+        max-width: ${PDF_PAGE_WIDTH_PX}px !important;
+      }
       * { box-sizing: border-box; }
     `;
     doc.head.appendChild(style);
@@ -2711,7 +2726,7 @@
 
     style.textContent = `
       ${resetRules}
-      @page { size: A4 portrait; margin: 0; }
+      ${buildPdfPageRule()}
       @media print {
         html, body {
           margin: 0 !important;
@@ -2728,6 +2743,9 @@
           inset: auto !important;
           overflow: visible !important;
           padding: 0 !important;
+          width: ${PDF_PAGE_WIDTH_PX}px !important;
+          min-width: ${PDF_PAGE_WIDTH_PX}px !important;
+          max-width: ${PDF_PAGE_WIDTH_PX}px !important;
         }
       }
     `;
@@ -2809,9 +2827,11 @@
       isExpandableScrollableElement,
       isMathRoot,
       isCodeBlockRoot,
+      buildPdfPageRule,
       prepareMountedPrintRoot,
       resolveMarkdownPackagingAssets,
-      resolveSelectableTarget
+      resolveSelectableTarget,
+      applyDynamicPageSize
     };
   }
 
