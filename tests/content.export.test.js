@@ -737,6 +737,27 @@ test("locks PDF page width to landscape A4 while keeping measured height", () =>
   assert.equal(root.style.overflow, "visible");
 });
 
+test("finalizePrintLayout waits for paint after applying the page rule", async () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const root = createElement("section", ownerDocument);
+  const styleEl = { textContent: "@page { size: 794px 1123px; margin: 0; }" };
+  let frameCount = 0;
+  root.scrollWidth = 1440;
+  root.scrollHeight = 2048;
+  root.offsetHeight = 2048;
+
+  await hooks.finalizePrintLayout(root, styleEl, {
+    requestAnimationFrame(callback) {
+      frameCount += 1;
+      callback();
+    }
+  });
+
+  assert.equal(frameCount, 2);
+  assert.equal(styleEl.textContent, "@page { size: 1123px 2048px; margin: 0; }");
+});
+
 test("expands vertically scrollable block containers", () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };

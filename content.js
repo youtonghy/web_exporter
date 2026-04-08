@@ -2617,10 +2617,9 @@
 
     const schedulePrint = () => {
       const printableRoot = isElementNode(importedRoot) ? importedRoot : doc.body.firstElementChild || doc.body;
-      waitForPrintAssets(printableRoot, doc, payload.sourceRoot, enhancedImages).finally(() => {
-        applyDynamicPageSize(printableRoot, styleEl);
-        setTimeout(triggerPrint, 50);
-      });
+      waitForPrintAssets(printableRoot, doc, payload.sourceRoot, enhancedImages)
+        .finally(() => finalizePrintLayout(printableRoot, styleEl, printWindow))
+        .then(triggerPrint, triggerPrint);
     };
 
     if (doc.readyState === "complete") {
@@ -2685,6 +2684,26 @@
       waitForFontsInDocument(doc || document).catch(() => undefined),
       waitForImages(container, getImageLoadTimeout(enhancedImages), enhancedImages)
     ]).then(() => prepareMountedPrintRoot(sourceRoot || container, container).catch(() => undefined));
+  }
+
+  function waitForNextPaint(targetWindow) {
+    return new Promise((resolve) => {
+      const frame = targetWindow && typeof targetWindow.requestAnimationFrame === "function"
+        ? targetWindow.requestAnimationFrame.bind(targetWindow)
+        : typeof requestAnimationFrame === "function"
+          ? requestAnimationFrame
+          : null;
+      if (!frame) {
+        setTimeout(resolve, 50);
+        return;
+      }
+      frame(() => frame(resolve));
+    });
+  }
+
+  async function finalizePrintLayout(printRoot, styleEl, targetWindow) {
+    applyDynamicPageSize(printRoot, styleEl);
+    await waitForNextPaint(targetWindow);
   }
 
   async function printInPage(target, keepStyles, enhancedImages) {
@@ -2759,19 +2778,20 @@
 
     window.addEventListener("afterprint", cleanup, { once: true });
     await waitForPrintAssets(clone, document, target, enhancedImages);
-    applyDynamicPageSize(clone, style);
+    await finalizePrintLayout(clone, style, window);
     window.print();
   }
 
   async function exportElementToPdf(target) {
+    const payload = buildPrintPayload(target, preserveStyles, enhancedImageLoading);
+    const opened = openPrintWindow(payload, enhancedImageLoading);
+    if (opened) {
+      return;
+    }
     try {
       await printInPage(target, preserveStyles, enhancedImageLoading);
     } catch (error) {
-      const payload = buildPrintPayload(target, preserveStyles, enhancedImageLoading);
-      const opened = openPrintWindow(payload, enhancedImageLoading);
-      if (!opened) {
-        alert(i18n.t("alert.print_blocked"));
-      }
+      alert(i18n.t("alert.print_blocked"));
     }
   }
 
@@ -2817,6 +2837,7 @@
       expandIframeElementToContent,
       expandMonacoEditors,
       expandScrollableElements,
+      finalizePrintLayout,
       getCodeBlockRoot,
       getCodeContentRoot,
       getDocumentContentHeight,
