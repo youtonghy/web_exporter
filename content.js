@@ -2488,6 +2488,14 @@
     if (!isElementNode(element) || !styleEl) {
       return;
     }
+    // Clear explicit height/min-height that inlined computed styles may have set
+    // (keepStyles=true inlines the source element's computed height, which can be
+    // larger than the actual content and would inflate scrollHeight).
+    // Also remove left margin so the content starts at the page edge.
+    element.style.height = "";
+    element.style.minHeight = "";
+    element.style.marginLeft = "0";
+    void element.offsetHeight; // flush layout before measuring
     const contentW = element.scrollWidth;
     const contentH = element.scrollHeight;
     if (!contentW || !contentH) {
