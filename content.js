@@ -1410,6 +1410,9 @@
     if (tag === "br") {
       return "\n";
     }
+    if (tag === "img") {
+      return convertInlineNode(node, context);
+    }
     if (BLOCK_TAGS.has(tag)) {
       return convertBlockChildren(node, context);
     }
@@ -1440,15 +1443,16 @@
     ];
     for (const img of imgs) {
       if (isMathRenderingImage(img)) continue;
-      const src = img.getAttribute("src") || "";
-      if (!src) continue;
-      let idx = srcToIndex.get(src);
+      const originalSrc = img.getAttribute("src") || "";
+      const assetSrc = img.currentSrc || originalSrc;
+      if (!assetSrc) continue;
+      let idx = srcToIndex.get(assetSrc);
       if (idx === undefined) {
         idx = assets.length + 1;
-        srcToIndex.set(src, idx);
-        assets.push({ placeholder: `__WEB_EXPORTER_IMAGE_${idx}__`, src, index: idx });
+        srcToIndex.set(assetSrc, idx);
+        assets.push({ placeholder: `__WEB_EXPORTER_IMAGE_${idx}__`, src: assetSrc, index: idx });
       }
-      restore.push({ img, src });
+      restore.push({ img, src: originalSrc });
       img.setAttribute("src", `__WEB_EXPORTER_IMAGE_${idx}__`);
     }
     let markdown;

@@ -526,6 +526,19 @@ test("deduplicates repeated image urls in package mode", () => {
   assert.match(collected.markdown, /__WEB_EXPORTER_IMAGE_1__/);
 });
 
+test("packages images that are direct children of block elements (div, figure)", () => {
+  const hooks = loadContentHooks();
+  const img = el("img", { alt: "photo", src: "data:image/png;base64,AQID" });
+  const caption = el("figcaption", {}, [text("A photo")]);
+  const root = el("figure", {}, [img, caption]);
+
+  const collected = hooks.collectMarkdownExport(root, { imagePackaging: true });
+
+  assert.equal(collected.assets.length, 1, "asset collected");
+  assert.match(collected.markdown, /!\[photo\]\(__WEB_EXPORTER_IMAGE_1__\)/, "placeholder in markdown");
+  assert.equal(img.getAttribute("src"), "data:image/png;base64,AQID", "original src restored");
+});
+
 test("creates a valid zip blob for markdown image packages", async () => {
   const hooks = loadContentHooks();
   const zipBlob = hooks.createZipBlob([
