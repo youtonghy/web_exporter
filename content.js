@@ -2484,46 +2484,8 @@
   const PDF_PAGE_HEIGHT_PX = 794;
 
   function buildPdfPageRule(heightPx = PDF_PAGE_HEIGHT_PX) {
-    return `@page { size: ${PDF_PAGE_WIDTH_PX}px ${Math.max(Math.ceil(Number(heightPx) || 0), PDF_PAGE_HEIGHT_PX)}px; margin: 0; }`;
-  }
-
-  // Keeps the PDF width fixed to a landscape A4 page while stretching the
-  // page height to fit the exported content onto a single sheet when possible.
-  // styleEl must be the <style> element that already contains the @page rule
-  // so we can overwrite it in-place.
-  function applyDynamicPageSize(element, styleEl) {
-    if (!isElementNode(element) || !styleEl) {
-      return;
-    }
-    // Clear explicit height/min-height that inlined computed styles may have set
-    // (keepStyles=true inlines the source element's computed height, which can be
-    // larger than the actual content and would inflate scrollHeight).
-    // Also remove left margin so the content starts at the page edge.
-    element.style.height = "";
-    element.style.minHeight = "";
-    element.style.marginLeft = "0";
-    element.style.maxWidth = `${PDF_PAGE_WIDTH_PX}px`;
-    element.style.boxSizing = "border-box";
-    // Add 1px padding-bottom to prevent margin collapsing between the element
-    // and its last child — collapsed margins are excluded from scrollHeight,
-    // causing the measured height to be too small and content to overflow onto
-    // a second page.  The padding stays in place during printing for consistency.
-    element.style.paddingBottom = "1px";
-    // Temporarily set overflow:hidden so scrollHeight also captures any
-    // margin-bottom on the last child that would otherwise collapse.
-    const prevOverflow = element.style.overflow;
-    element.style.overflow = "hidden";
-    void element.offsetHeight; // flush layout before measuring
-    const contentW = element.scrollWidth;
-    const contentH = element.scrollHeight;
-    element.style.overflow = prevOverflow;
-    if (!contentW || !contentH) {
-      return;
-    }
-    const pageRule = buildPdfPageRule(contentH);
-    styleEl.textContent = /@page\s*\{[^}]*\}/.test(styleEl.textContent)
-      ? styleEl.textContent.replace(/@page\s*\{[^}]*\}/, pageRule)
-      : `${pageRule}\n${styleEl.textContent}`;
+    void heightPx;
+    return "@page { size: A4 landscape; margin: 0; }";
   }
 
   function buildPrintPayload(target, keepStyles, enhancedImages) {
@@ -2604,7 +2566,7 @@
     }
 
     const doc = printWindow.document;
-    const { importedRoot, styleEl } = populatePrintDocument(doc, payload);
+    const { importedRoot } = populatePrintDocument(doc, payload);
 
     const triggerPrint = () => {
       try {
@@ -2618,7 +2580,6 @@
     const schedulePrint = () => {
       const printableRoot = isElementNode(importedRoot) ? importedRoot : doc.body.firstElementChild || doc.body;
       waitForPrintAssets(printableRoot, doc, payload.sourceRoot, enhancedImages)
-        .finally(() => finalizePrintLayout(printableRoot, styleEl, printWindow))
         .then(triggerPrint, triggerPrint);
     };
 
@@ -2684,26 +2645,6 @@
       waitForFontsInDocument(doc || document).catch(() => undefined),
       waitForImages(container, getImageLoadTimeout(enhancedImages), enhancedImages)
     ]).then(() => prepareMountedPrintRoot(sourceRoot || container, container).catch(() => undefined));
-  }
-
-  function waitForNextPaint(targetWindow) {
-    return new Promise((resolve) => {
-      const frame = targetWindow && typeof targetWindow.requestAnimationFrame === "function"
-        ? targetWindow.requestAnimationFrame.bind(targetWindow)
-        : typeof requestAnimationFrame === "function"
-          ? requestAnimationFrame
-          : null;
-      if (!frame) {
-        setTimeout(resolve, 50);
-        return;
-      }
-      frame(() => frame(resolve));
-    });
-  }
-
-  async function finalizePrintLayout(printRoot, styleEl, targetWindow) {
-    applyDynamicPageSize(printRoot, styleEl);
-    await waitForNextPaint(targetWindow);
   }
 
   async function printInPage(target, keepStyles, enhancedImages) {
@@ -2778,7 +2719,6 @@
 
     window.addEventListener("afterprint", cleanup, { once: true });
     await waitForPrintAssets(clone, document, target, enhancedImages);
-    await finalizePrintLayout(clone, style, window);
     window.print();
   }
 
@@ -2837,7 +2777,6 @@
       expandIframeElementToContent,
       expandMonacoEditors,
       expandScrollableElements,
-      finalizePrintLayout,
       getCodeBlockRoot,
       getCodeContentRoot,
       getDocumentContentHeight,
@@ -2851,8 +2790,7 @@
       buildPdfPageRule,
       prepareMountedPrintRoot,
       resolveMarkdownPackagingAssets,
-      resolveSelectableTarget,
-      applyDynamicPageSize
+      resolveSelectableTarget
     };
   }
 

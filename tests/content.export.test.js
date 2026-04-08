@@ -699,63 +699,11 @@ test("keeps only the visible Ed Amber screen clone and expands it for print", as
   assert.equal(clone.screenPre.style.height, "260px");
 });
 
-test("builds landscape A4 page rules with a dynamic height floor", () => {
+test("builds a standard landscape A4 page rule", () => {
   const hooks = loadContentHooks();
 
-  assert.equal(
-    hooks.buildPdfPageRule(640),
-    "@page { size: 1123px 794px; margin: 0; }"
-  );
-  assert.equal(
-    hooks.buildPdfPageRule(1480),
-    "@page { size: 1123px 1480px; margin: 0; }"
-  );
-});
-
-test("locks PDF page width to landscape A4 while keeping measured height", () => {
-  const hooks = loadContentHooks();
-  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
-  const root = createElement("section", ownerDocument);
-  const styleEl = { textContent: "@page { size: 794px 1123px; margin: 0; }\nbody { margin: 0; }" };
-  root.scrollWidth = 1680;
-  root.scrollHeight = 1526;
-  root.offsetHeight = 1526;
-  root.style.height = "2400px";
-  root.style.minHeight = "2400px";
-  root.style.marginLeft = "auto";
-  root.style.overflow = "visible";
-
-  hooks.applyDynamicPageSize(root, styleEl);
-
-  assert.equal(styleEl.textContent, "@page { size: 1123px 1526px; margin: 0; }\nbody { margin: 0; }");
-  assert.equal(root.style.height, "");
-  assert.equal(root.style.minHeight, "");
-  assert.equal(root.style.marginLeft, "0");
-  assert.equal(root.style.maxWidth, "1123px");
-  assert.equal(root.style.boxSizing, "border-box");
-  assert.equal(root.style.paddingBottom, "1px");
-  assert.equal(root.style.overflow, "visible");
-});
-
-test("finalizePrintLayout waits for paint after applying the page rule", async () => {
-  const hooks = loadContentHooks();
-  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
-  const root = createElement("section", ownerDocument);
-  const styleEl = { textContent: "@page { size: 794px 1123px; margin: 0; }" };
-  let frameCount = 0;
-  root.scrollWidth = 1440;
-  root.scrollHeight = 2048;
-  root.offsetHeight = 2048;
-
-  await hooks.finalizePrintLayout(root, styleEl, {
-    requestAnimationFrame(callback) {
-      frameCount += 1;
-      callback();
-    }
-  });
-
-  assert.equal(frameCount, 2);
-  assert.equal(styleEl.textContent, "@page { size: 1123px 2048px; margin: 0; }");
+  assert.equal(hooks.buildPdfPageRule(), "@page { size: A4 landscape; margin: 0; }");
+  assert.equal(hooks.buildPdfPageRule(640), "@page { size: A4 landscape; margin: 0; }");
 });
 
 test("expands vertically scrollable block containers", () => {
