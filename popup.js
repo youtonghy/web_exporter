@@ -110,44 +110,39 @@ function injectContentScript(tabId) {
 function updateFormatUI() {
   const isMarkdown = formatSelect.value === "markdown";
   const isPng = formatSelect.value === "png";
-  if (isMarkdown) {
+  const isPdf = !isMarkdown && !isPng;
+
+  if (isPdf) {
+    preserveRow.style.display = "";
+    preserveToggle.disabled = false;
+    preserveToggle.checked = lastPreserveValue;
+  } else {
     lastPreserveValue = preserveToggle.checked;
     preserveToggle.checked = false;
+    preserveRow.style.display = "none";
     preserveToggle.disabled = true;
-    preserveRow.classList.add("is-disabled");
+  }
+
+  if (isPng) {
+    enhancedRow.style.display = "";
+    enhancedToggle.disabled = false;
+    enhancedToggle.checked = lastEnhancedValue;
+  } else {
     lastEnhancedValue = enhancedToggle.checked;
     enhancedToggle.checked = false;
+    enhancedRow.style.display = "none";
     enhancedToggle.disabled = true;
-    enhancedRow.classList.add("is-disabled");
+  }
+
+  if (isMarkdown) {
+    imagePackagingRow.style.display = "";
     imagePackagingToggle.disabled = false;
-    imagePackagingRow.classList.remove("is-disabled");
     imagePackagingToggle.checked = lastImagePackagingValue;
-  } else if (isPng) {
-    lastPreserveValue = preserveToggle.checked;
-    preserveToggle.checked = false;
-    preserveToggle.disabled = true;
-    preserveRow.classList.add("is-disabled");
-
-    enhancedToggle.disabled = false;
-    enhancedRow.classList.remove("is-disabled");
-    enhancedToggle.checked = lastEnhancedValue;
-
-    lastImagePackagingValue = imagePackagingToggle.checked;
-    imagePackagingToggle.checked = false;
-    imagePackagingToggle.disabled = true;
-    imagePackagingRow.classList.add("is-disabled");
   } else {
-    preserveToggle.disabled = false;
-    preserveRow.classList.remove("is-disabled");
-    preserveToggle.checked = lastPreserveValue;
-    enhancedToggle.disabled = false;
-    enhancedRow.classList.remove("is-disabled");
-    enhancedToggle.checked = lastEnhancedValue;
-
     lastImagePackagingValue = imagePackagingToggle.checked;
     imagePackagingToggle.checked = false;
+    imagePackagingRow.style.display = "none";
     imagePackagingToggle.disabled = true;
-    imagePackagingRow.classList.add("is-disabled");
   }
 }
 

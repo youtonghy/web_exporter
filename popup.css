@@ -30,10 +30,6 @@ h1 {
   font-size: 13px;
 }
 
-.toggle.is-disabled {
-  opacity: 0.6;
-}
-
 .field {
   display: flex;
   flex-direction: column;
