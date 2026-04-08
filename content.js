@@ -56,6 +56,7 @@
   let preserveStyles = true;
   let exportFormat = "pdf";
   let enhancedImageLoading = false;
+  let imagePackaging = false;
   let lastHighlighted = null;
   let overlay = null;
 
@@ -208,13 +209,14 @@
     return mathRoot || element;
   }
 
-  function startSelection(keepStyles, format, enhancedImages) {
+  function startSelection(keepStyles, format, enhancedImages, packImages) {
     if (selecting) {
       return;
     }
     preserveStyles = Boolean(keepStyles);
     exportFormat = format === "markdown" ? "markdown" : format === "png" ? "png" : "pdf";
     enhancedImageLoading = Boolean(enhancedImages);
+    imagePackaging = Boolean(packImages);
     selecting = true;
     ensureStyleTag();
     createOverlay();
@@ -2704,9 +2706,29 @@
   }
 
   function exportElementToMarkdown(target) {
-    const markdown = elementToMarkdown(target);
-    const filename = `${sanitizeFilename(document.title)}.md`;
-    downloadMarkdown(markdown, filename);
+    const baseName = sanitizeFilename(document.title);
+    if (!imagePackaging) {
+      downloadMarkdown(elementToMarkdown(target), `${baseName}.md`);
+      return;
+    }
+    const plainMarkdown = elementToMarkdown(target);
+    const collected = collectMarkdownExport(target, { imagePackaging: true });
+    if (!collected.assets.length) {
+      downloadMarkdown(collected.markdown, `${baseName}.md`);
+      return;
+    }
+    resolveMarkdownPackagingAssets(collected.assets)
+      .then((resolved) => {
+        const finalMarkdown = applyMarkdownAssetUrls(collected.markdown, resolved);
+        const entries = [
+          { name: `${baseName}.md`, data: new TextEncoder().encode(finalMarkdown) },
+          ...resolved.map((r) => ({ name: r.outputPath, data: r.bytes }))
+        ];
+        downloadBlob(createZipBlob(entries), `${baseName}.zip`);
+      })
+      .catch(() => {
+        downloadMarkdown(plainMarkdown, `${baseName}.md`);
+      });
   }
 
   if (globalThis.__WEB_EXPORTER_TEST_HOOKS__) {
@@ -2751,7 +2773,7 @@
       }
 
       if (message.type === "START_SELECTION") {
-        startSelection(message.preserveStyles, message.exportFormat, message.enhancedImageLoading);
+        startSelection(message.preserveStyles, message.exportFormat, message.enhancedImageLoading, message.imagePackaging);
         if (typeof sendResponse === "function") {
           sendResponse({ ok: true });
         }

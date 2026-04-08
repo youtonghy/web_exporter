@@ -8,12 +8,12 @@ const preserveToggle = document.getElementById("preserveStyles");
 const preserveRow = document.getElementById("preserveStylesRow");
 const enhancedToggle = document.getElementById("enhancedImageLoading");
 const enhancedRow = document.getElementById("enhancedImageLoadingRow");
-const markdownPackageToggle = document.getElementById("markdownImagePackage");
-const markdownPackageRow = document.getElementById("markdownImagePackageRow");
+const imagePackagingToggle = document.getElementById("imagePackaging");
+const imagePackagingRow = document.getElementById("imagePackagingRow");
 const selectButton = document.getElementById("selectAndExport");
 let lastPreserveValue = preserveToggle.checked;
 let lastEnhancedValue = enhancedToggle.checked;
-let lastMarkdownPackageValue = markdownPackageToggle.checked;
+let lastImagePackagingValue = imagePackagingToggle.checked;
 
 applyTranslations(document);
 document.documentElement.lang = getLocale();
@@ -73,23 +73,11 @@ function sendMessage(tabId, message) {
 
 function injectContentScript(tabId) {
   if (api.scripting && api.scripting.executeScript) {
-    return injectScriptFiles(tabId, ["src/i18n/index.js", "content.js"]);
-  }
-
-  if (api.tabs && api.tabs.executeScript) {
-    return injectScriptFiles(tabId, ["src/i18n/index.js", "content.js"]);
-  }
-
-  return Promise.reject(new Error(t("error.scripting_unavailable")));
-}
-
-function executeScriptFile(tabId, file) {
-  if (api.scripting && api.scripting.executeScript) {
     return new Promise((resolve, reject) => {
       api.scripting.executeScript(
         {
           target: { tabId },
-          files: [file]
+          files: ["content.js"]
         },
         () => {
           const err = api.runtime && api.runtime.lastError;
@@ -105,7 +93,7 @@ function executeScriptFile(tabId, file) {
 
   if (api.tabs && api.tabs.executeScript) {
     return new Promise((resolve, reject) => {
-      api.tabs.executeScript(tabId, { file }, () => {
+      api.tabs.executeScript(tabId, { file: "content.js" }, () => {
         const err = api.runtime && api.runtime.lastError;
         if (err) {
           reject(err);
@@ -117,12 +105,6 @@ function executeScriptFile(tabId, file) {
   }
 
   return Promise.reject(new Error(t("error.scripting_unavailable")));
-}
-
-async function injectScriptFiles(tabId, files) {
-  for (const file of files) {
-    await executeScriptFile(tabId, file);
-  }
 }
 
 function updateFormatUI() {
@@ -137,10 +119,9 @@ function updateFormatUI() {
     enhancedToggle.checked = false;
     enhancedToggle.disabled = true;
     enhancedRow.classList.add("is-disabled");
-
-    markdownPackageToggle.disabled = false;
-    markdownPackageToggle.checked = lastMarkdownPackageValue;
-    markdownPackageRow.classList.remove("is-disabled");
+    imagePackagingToggle.disabled = false;
+    imagePackagingRow.classList.remove("is-disabled");
+    imagePackagingToggle.checked = lastImagePackagingValue;
   } else if (isPng) {
     lastPreserveValue = preserveToggle.checked;
     preserveToggle.checked = false;
@@ -151,10 +132,10 @@ function updateFormatUI() {
     enhancedRow.classList.remove("is-disabled");
     enhancedToggle.checked = lastEnhancedValue;
 
-    lastMarkdownPackageValue = markdownPackageToggle.checked;
-    markdownPackageToggle.checked = false;
-    markdownPackageToggle.disabled = true;
-    markdownPackageRow.classList.add("is-disabled");
+    lastImagePackagingValue = imagePackagingToggle.checked;
+    imagePackagingToggle.checked = false;
+    imagePackagingToggle.disabled = true;
+    imagePackagingRow.classList.add("is-disabled");
   } else {
     preserveToggle.disabled = false;
     preserveRow.classList.remove("is-disabled");
@@ -163,10 +144,10 @@ function updateFormatUI() {
     enhancedRow.classList.remove("is-disabled");
     enhancedToggle.checked = lastEnhancedValue;
 
-    lastMarkdownPackageValue = markdownPackageToggle.checked;
-    markdownPackageToggle.checked = false;
-    markdownPackageToggle.disabled = true;
-    markdownPackageRow.classList.add("is-disabled");
+    lastImagePackagingValue = imagePackagingToggle.checked;
+    imagePackagingToggle.checked = false;
+    imagePackagingToggle.disabled = true;
+    imagePackagingRow.classList.add("is-disabled");
   }
 }
 
@@ -189,7 +170,7 @@ selectButton.addEventListener("click", async () => {
       preserveStyles: preserveToggle.checked,
       exportFormat: formatSelect.value,
       enhancedImageLoading: enhancedToggle.checked,
-      markdownImagePackage: markdownPackageToggle.checked
+      imagePackaging: imagePackagingToggle.checked
     };
 
     try {
