@@ -2480,24 +2480,23 @@
     expandScrollableElements(mountedRoot);
   }
 
-  // A4 portrait at 96 dpi: 210mm × 297mm = ~794px × ~1123px
-  const PDF_PAGE_WIDTH_PX = 794;
-  const PDF_PAGE_HEIGHT_PX = 1123;
-  // Minimum zoom prevents content from becoming unreadably small.
-  // At 0.5, content up to ~2 pages tall can still fit on one page.
-  const PDF_MIN_ZOOM = 0.5;
-
-  function computeFitToPageZoom(element) {
-    if (!isElementNode(element)) {
-      return 1;
+  // Dynamically sets @page size to match content dimensions, producing a
+  // single-page PDF as tall as the content rather than paginating across
+  // multiple A4 sheets.  styleEl must be the <style> element that already
+  // contains the @page rule so we can overwrite it in-place.
+  function applyDynamicPageSize(element, styleEl) {
+    if (!isElementNode(element) || !styleEl) {
+      return;
     }
     const contentW = element.scrollWidth;
     const contentH = element.scrollHeight;
     if (!contentW || !contentH) {
-      return 1;
+      return;
     }
-    const scale = Math.min(PDF_PAGE_WIDTH_PX / contentW, PDF_PAGE_HEIGHT_PX / contentH, 1);
-    return Math.max(scale, PDF_MIN_ZOOM);
+    styleEl.textContent = styleEl.textContent.replace(
+      /@page\s*\{[^}]*\}/,
+      `@page { size: ${contentW}px ${contentH}px; margin: 0; }`
+    );
   }
 
   function buildPrintPayload(target, keepStyles, enhancedImages) {
@@ -2555,7 +2554,7 @@
 
     const imported = doc.importNode(clone, true);
     doc.body.appendChild(imported);
-    return imported;
+    return { importedRoot: imported, styleEl: style };
   }
 
   function waitForFontsInDocument(doc) {
@@ -2572,7 +2571,7 @@
     }
 
     const doc = printWindow.document;
-    const importedRoot = populatePrintDocument(doc, payload);
+    const { importedRoot, styleEl } = populatePrintDocument(doc, payload);
 
     const triggerPrint = () => {
       try {
@@ -2586,12 +2585,7 @@
     const schedulePrint = () => {
       const printableRoot = isElementNode(importedRoot) ? importedRoot : doc.body.firstElementChild || doc.body;
       waitForPrintAssets(printableRoot, doc, payload.sourceRoot, enhancedImages).finally(() => {
-        if (isElementNode(printableRoot)) {
-          const zoom = computeFitToPageZoom(printableRoot);
-          if (zoom < 1) {
-            printableRoot.style.zoom = String(zoom);
-          }
-        }
+        applyDynamicPageSize(printableRoot, styleEl);
         setTimeout(triggerPrint, 50);
       });
     };
@@ -2729,10 +2723,7 @@
 
     window.addEventListener("afterprint", cleanup, { once: true });
     await waitForPrintAssets(clone, document, target, enhancedImages);
-    const zoom = computeFitToPageZoom(clone);
-    if (zoom < 1) {
-      clone.style.zoom = String(zoom);
-    }
+    applyDynamicPageSize(clone, style);
     window.print();
   }
 
