@@ -706,6 +706,23 @@ test("builds a standard portrait A4 page rule", () => {
   assert.equal(hooks.buildPdfPageRule(640), "@page { size: A4 portrait; margin: 0; }");
 });
 
+test("normalizes print root layout to remove centered margins", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const root = createElement("section", ownerDocument);
+  root.style.marginLeft = "auto";
+  root.style.marginRight = "auto";
+  root.style.marginInlineStart = "auto";
+  root.style.marginInlineEnd = "auto";
+
+  hooks.normalizePrintRootLayout(root);
+
+  assert.equal(root.style.marginLeft, "0");
+  assert.equal(root.style.marginRight, "0");
+  assert.equal(root.style.marginInlineStart, "0");
+  assert.equal(root.style.marginInlineEnd, "0");
+});
+
 test("expands vertically scrollable block containers", () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };

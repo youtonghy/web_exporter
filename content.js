@@ -2478,6 +2478,17 @@
     await expandSameOriginIframes(mountedRoot);
     expandMonacoEditors(mountedRoot);
     expandScrollableElements(mountedRoot);
+    normalizePrintRootLayout(mountedRoot);
+  }
+
+  function normalizePrintRootLayout(root) {
+    if (!isElementNode(root)) {
+      return;
+    }
+    root.style.marginLeft = "0";
+    root.style.marginRight = "0";
+    root.style.marginInlineStart = "0";
+    root.style.marginInlineEnd = "0";
   }
 
   const PDF_PAGE_WIDTH_PX = 794;
@@ -2723,15 +2734,14 @@
   }
 
   async function exportElementToPdf(target) {
-    const payload = buildPrintPayload(target, preserveStyles, enhancedImageLoading);
-    const opened = openPrintWindow(payload, enhancedImageLoading);
-    if (opened) {
-      return;
-    }
     try {
       await printInPage(target, preserveStyles, enhancedImageLoading);
     } catch (error) {
-      alert(i18n.t("alert.print_blocked"));
+      const payload = buildPrintPayload(target, preserveStyles, enhancedImageLoading);
+      const opened = openPrintWindow(payload, enhancedImageLoading);
+      if (!opened) {
+        alert(i18n.t("alert.print_blocked"));
+      }
     }
   }
 
@@ -2788,6 +2798,7 @@
       isMathRoot,
       isCodeBlockRoot,
       buildPdfPageRule,
+      normalizePrintRootLayout,
       prepareMountedPrintRoot,
       resolveMarkdownPackagingAssets,
       resolveSelectableTarget
