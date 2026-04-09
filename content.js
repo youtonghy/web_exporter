@@ -2480,12 +2480,12 @@
     expandScrollableElements(mountedRoot);
   }
 
-  const PDF_PAGE_WIDTH_PX = 1123;
-  const PDF_PAGE_HEIGHT_PX = 794;
+  const PDF_PAGE_WIDTH_PX = 794;
+  const PDF_PAGE_HEIGHT_PX = 1123;
 
   function buildPdfPageRule(heightPx = PDF_PAGE_HEIGHT_PX) {
     void heightPx;
-    return "@page { size: A4 landscape; margin: 0; }";
+    return "@page { size: A4 portrait; margin: 0; }";
   }
 
   function buildPrintPayload(target, keepStyles, enhancedImages) {

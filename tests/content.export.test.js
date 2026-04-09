@@ -699,11 +699,11 @@ test("keeps only the visible Ed Amber screen clone and expands it for print", as
   assert.equal(clone.screenPre.style.height, "260px");
 });
 
-test("builds a standard landscape A4 page rule", () => {
+test("builds a standard portrait A4 page rule", () => {
   const hooks = loadContentHooks();
 
-  assert.equal(hooks.buildPdfPageRule(), "@page { size: A4 landscape; margin: 0; }");
-  assert.equal(hooks.buildPdfPageRule(640), "@page { size: A4 landscape; margin: 0; }");
+  assert.equal(hooks.buildPdfPageRule(), "@page { size: A4 portrait; margin: 0; }");
+  assert.equal(hooks.buildPdfPageRule(640), "@page { size: A4 portrait; margin: 0; }");
 });
 
 test("expands vertically scrollable block containers", () => {
