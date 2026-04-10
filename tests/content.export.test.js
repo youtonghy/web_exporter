@@ -665,6 +665,52 @@ test("preserves line breaks for generic div code blocks in print clone", () => {
   assert.equal(clone.style.height, "240px");
 });
 
+test("copies only the whitelisted computed styles into inline style text", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createElement("div", ownerDocument, { style: "border:1px solid red" });
+  const target = createElement("div", ownerDocument);
+
+  setComputedStyle(source, {
+    display: "grid",
+    color: "rgb(10, 20, 30)",
+    fontFamily: '"IBM Plex Sans", sans-serif',
+    cursor: "pointer",
+    backgroundImage: "url(example.png)",
+    getPropertyValue(name) {
+      return this[toCamelCase(name)] || "";
+    }
+  });
+
+  hooks.inlineStyleSubset(source, target, hooks.createNodeMeasureCache());
+
+  const style = target.getAttribute("style");
+  assert.match(style, /display:grid;/);
+  assert.match(style, /color:rgb\(10, 20, 30\);/);
+  assert.match(style, /font-family:"IBM Plex Sans", sans-serif;/);
+  assert.match(style, /background-image:url\(example\.png\);/);
+  assert.doesNotMatch(style, /cursor:pointer;/);
+});
+
+test("prepareClone applies print preparation in a single traversal context", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createEdAmberCodePair(ownerDocument);
+  const clone = createEdAmberCodePair(ownerDocument);
+
+  hooks.prepareClone(source.root, clone.root, {
+    inlineStyles: true,
+    stripStyles: false,
+    syncImages: false,
+    enhancedImages: false
+  });
+
+  assert.equal(clone.screenCard.style.display, "block");
+  assert.equal(clone.printCard.style.display, "none");
+  assert.equal(clone.screenSlot.style.whiteSpace, "pre-wrap");
+  assert.equal(clone.screenPre.style.height, "260px");
+});
+
 test("expands generic div code block containers with hidden overflow", async () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
@@ -697,6 +743,26 @@ test("keeps only the visible Ed Amber screen clone and expands it for print", as
   assert.equal(clone.screenSlot.style.maxHeight, "none");
   assert.equal(clone.screenSlot.style.height, "260px");
   assert.equal(clone.screenPre.style.height, "260px");
+});
+
+test("reuses measured heights within the same cache", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const node = createElement("div", ownerDocument);
+  setComputedStyle(node, { height: "120px" });
+
+  const cache = hooks.createNodeMeasureCache();
+  const first = hooks.getNodeMeasuredHeight(node, cache);
+  node.scrollHeight = 999;
+  node.clientHeight = 999;
+  node.offsetHeight = 999;
+  setComputedStyle(node, { height: "999px" });
+  const second = hooks.getNodeMeasuredHeight(node, cache);
+  const refreshed = hooks.getNodeMeasuredHeight(node, hooks.createNodeMeasureCache());
+
+  assert.equal(first, 120);
+  assert.equal(second, 120);
+  assert.equal(refreshed, 999);
 });
 
 test("builds a standard portrait A4 page rule", () => {
