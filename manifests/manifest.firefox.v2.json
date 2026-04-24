@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Web Exporter",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Export selected page elements to PDF, Markdown, or PNG.",
   "browser_specific_settings": {
     "gecko": {
@@ -28,6 +28,7 @@
     }
   },
   "permissions": ["activeTab", "tabs", "<all_urls>"],
+  "web_accessible_resources": ["lib/html2canvas.min.js", "lib/pdf-lib.min.js"],
   "background": {
     "scripts": ["background.js"],
     "persistent": false

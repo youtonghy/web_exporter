@@ -4,6 +4,9 @@ const { t, applyTranslations, getLocale } = i18n;
 
 const statusEl = document.getElementById("status");
 const formatSelect = document.getElementById("exportFormat");
+const pdfEngineSelect = document.getElementById("pdfEngine");
+const pdfEngineRow = document.getElementById("pdfEngineRow");
+const pdfEngineHint = document.getElementById("pdfEngineHint");
 const preserveToggle = document.getElementById("preserveStyles");
 const preserveRow = document.getElementById("preserveStylesRow");
 const enhancedToggle = document.getElementById("enhancedImageLoading");
@@ -14,6 +17,10 @@ const selectButton = document.getElementById("selectAndExport");
 let lastPreserveValue = preserveToggle.checked;
 let lastEnhancedValue = enhancedToggle.checked;
 let lastImagePackagingValue = imagePackagingToggle.checked;
+let lastPdfEngineValue = pdfEngineSelect.value;
+
+const isChrome = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getManifest && chrome.runtime.getManifest().manifest_version === 3;
+const isFirefox = typeof browser !== "undefined" && browser.runtime && typeof browser.runtime.getBrowserInfo === "function";
 
 applyTranslations(document);
 document.documentElement.lang = getLocale();
@@ -107,6 +114,51 @@ function injectContentScript(tabId) {
   return Promise.reject(new Error(t("error.scripting_unavailable")));
 }
 
+function updatePdfEngineUI() {
+  const isPdf = formatSelect.value === "pdf";
+  if (!isPdf) {
+    pdfEngineRow.style.display = "none";
+    pdfEngineHint.style.display = "none";
+    return;
+  }
+
+  pdfEngineRow.style.display = "";
+  pdfEngineHint.style.display = "";
+
+  const cdpOption = pdfEngineSelect.querySelector('option[value="cdp"]');
+  const html2canvasOption = pdfEngineSelect.querySelector('option[value="html2canvas"]');
+  const nativeOption = pdfEngineSelect.querySelector('option[value="native"]');
+
+  if (isChrome) {
+    cdpOption.disabled = false;
+    nativeOption.disabled = false;
+    html2canvasOption.disabled = true;
+    if (pdfEngineSelect.value === "html2canvas" || !pdfEngineSelect.value) {
+      pdfEngineSelect.value = "cdp";
+    }
+  } else if (isFirefox) {
+    cdpOption.disabled = true;
+    nativeOption.disabled = false;
+    html2canvasOption.disabled = false;
+    if (pdfEngineSelect.value === "cdp" || !pdfEngineSelect.value) {
+      pdfEngineSelect.value = "html2canvas";
+    }
+  } else {
+    cdpOption.disabled = true;
+    html2canvasOption.disabled = true;
+    nativeOption.disabled = false;
+    pdfEngineSelect.value = "native";
+  }
+
+  const hintKey = pdfEngineSelect.value === "cdp"
+    ? "hint.pdf_engine_cdp"
+    : pdfEngineSelect.value === "html2canvas"
+      ? "hint.pdf_engine_html2canvas"
+      : "hint.pdf_engine_native";
+  pdfEngineHint.setAttribute("data-i18n", hintKey);
+  applyTranslations(pdfEngineHint.parentNode || pdfEngineHint);
+}
+
 function updateFormatUI() {
   const isMarkdown = formatSelect.value === "markdown";
   const isPng = formatSelect.value === "png";
@@ -144,9 +196,12 @@ function updateFormatUI() {
     imagePackagingRow.style.display = "none";
     imagePackagingToggle.disabled = true;
   }
+
+  updatePdfEngineUI();
 }
 
 formatSelect.addEventListener("change", updateFormatUI);
+pdfEngineSelect.addEventListener("change", updatePdfEngineUI);
 updateFormatUI();
 
 selectButton.addEventListener("click", async () => {
@@ -165,7 +220,8 @@ selectButton.addEventListener("click", async () => {
       preserveStyles: preserveToggle.checked,
       exportFormat: formatSelect.value,
       enhancedImageLoading: enhancedToggle.checked,
-      imagePackaging: imagePackagingToggle.checked
+      imagePackaging: imagePackagingToggle.checked,
+      pdfEngine: formatSelect.value === "pdf" ? pdfEngineSelect.value : undefined
     };
 
     try {

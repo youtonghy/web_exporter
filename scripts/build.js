@@ -13,7 +13,8 @@ const copyItems = [
   "popup.css",
   "background.js",
   "icons",
-  "src"
+  "src",
+  "lib"
 ];
 const manifestTemplates = {
   chrome: "manifests/manifest.chrome.v3.json",

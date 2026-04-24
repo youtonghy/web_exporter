@@ -29,34 +29,38 @@ function captureVisibleTab(windowId) {
   });
 }
 
-async function fetchExportAsset(url, fetchImpl = globalThis.fetch) {
-  if (typeof fetchImpl !== "function") {
-    throw new Error("Fetch API unavailable");
+function printToPdfCdp(sender, sendResponse) {
+  const tabId = sender && sender.tab ? sender.tab.id : undefined;
+  if (!tabId) {
+    sendResponse({ ok: false, error: "No active tab" });
+    return;
+  }
+  if (!api.debugger || typeof api.debugger.attach !== "function") {
+    sendResponse({ ok: false, error: "Debugger API not available" });
+    return;
   }
 
-  const response = await fetchImpl(url, {
-    credentials: "include",
-    redirect: "follow"
-  });
-
-  if (!response || !response.ok) {
-    const status = response ? `${response.status} ${response.statusText || ""}`.trim() : "Unknown error";
-    throw new Error(`Asset request failed: ${status}`);
-  }
-
-  const buffer = await response.arrayBuffer();
-  return {
-    bytes: Array.from(new Uint8Array(buffer)),
-    contentType: response.headers && typeof response.headers.get === "function" ? response.headers.get("content-type") || "" : "",
-    finalUrl: response.url || url
-  };
-}
-
-if (globalThis.__WEB_EXPORTER_TEST_HOOKS__) {
-  globalThis.__WEB_EXPORTER_TEST_HOOKS__ = {
-    captureVisibleTab,
-    fetchExportAsset
-  };
+  const debuggee = { tabId };
+  api.debugger.attach(debuggee, "1.3")
+    .then(() => api.debugger.sendCommand(debuggee, "Page.printToPDF", {
+      printBackground: true,
+      paperWidth: 8.27,
+      paperHeight: 11.69,
+      marginTop: 0,
+      marginBottom: 0,
+      marginLeft: 0,
+      marginRight: 0,
+      displayHeaderFooter: false,
+      preferCSSPageSize: true
+    }))
+    .then(({ data }) => {
+      api.debugger.detach(debuggee).catch(() => {});
+      sendResponse({ ok: true, base64: data });
+    })
+    .catch((error) => {
+      api.debugger.detach(debuggee).catch(() => {});
+      sendResponse({ ok: false, error: error && error.message ? error.message : String(error) });
+    });
 }
 
 if (api && api.runtime && api.runtime.onMessage) {
@@ -74,19 +78,11 @@ if (api && api.runtime && api.runtime.onMessage) {
         .catch((error) => {
           sendResponse({ ok: false, error: error && error.message ? error.message : String(error) });
         });
-
       return true;
     }
 
-    if (message.type === "FETCH_EXPORT_ASSET") {
-      fetchExportAsset(message.url)
-        .then((asset) => {
-          sendResponse({ ok: true, ...asset });
-        })
-        .catch((error) => {
-          sendResponse({ ok: false, error: error && error.message ? error.message : String(error) });
-        });
-
+    if (message.type === "PRINT_TO_PDF_CDP") {
+      printToPdfCdp(sender, sendResponse);
       return true;
     }
   });

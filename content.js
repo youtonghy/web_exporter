@@ -150,6 +150,7 @@
   let exportFormat = "pdf";
   let enhancedImageLoading = false;
   let imagePackaging = false;
+  let pdfEngine = "native";
   let lastHighlighted = null;
   let overlay = null;
 
@@ -302,7 +303,7 @@
     return mathRoot || element;
   }
 
-  function startSelection(keepStyles, format, enhancedImages, packImages) {
+  function startSelection(keepStyles, format, enhancedImages, packImages, engine) {
     if (selecting) {
       return;
     }
@@ -310,6 +311,7 @@
     exportFormat = format === "markdown" ? "markdown" : format === "png" ? "png" : "pdf";
     enhancedImageLoading = Boolean(enhancedImages);
     imagePackaging = Boolean(packImages);
+    pdfEngine = engine === "cdp" ? "cdp" : engine === "html2canvas" ? "html2canvas" : "native";
     selecting = true;
     ensureStyleTag();
     createOverlay();
@@ -2970,7 +2972,243 @@
     window.print();
   }
 
+  async function exportElementToPdfViaCdp(target) {
+    cleanupPrintArtifacts();
+
+    const clone = target.cloneNode(true);
+    prepareClone(target, clone, {
+      inlineStyles: preserveStyles,
+      stripStyles: !preserveStyles,
+      syncImages: true,
+      enhancedImages: enhancedImageLoading
+    });
+
+    const container = document.createElement("div");
+    container.id = PRINT_CONTAINER_ID;
+    container.style.position = "fixed";
+    container.style.inset = "0";
+    container.style.overflow = "auto";
+    container.style.background = "#ffffff";
+    container.style.padding = "16px";
+    container.style.zIndex = "2147483647";
+    container.appendChild(clone);
+
+    const style = document.createElement("style");
+    style.id = PRINT_STYLE_ID;
+    const resetRules = preserveStyles
+      ? ""
+      : `
+        #${PRINT_CONTAINER_ID},
+        #${PRINT_CONTAINER_ID} * {
+          all: revert;
+        }
+        #${PRINT_CONTAINER_ID} {
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          color: #111111;
+        }
+      `;
+
+    style.textContent = `
+      ${resetRules}
+      ${buildPdfPageRule()}
+      @media print {
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          display: block !important;
+          max-width: none !important;
+          overflow: visible !important;
+        }
+        body > *:not(#${PRINT_CONTAINER_ID}) {
+          display: none !important;
+        }
+        #${PRINT_CONTAINER_ID} {
+          position: static !important;
+          inset: auto !important;
+          overflow: visible !important;
+          padding: 0 !important;
+          width: ${PDF_PAGE_WIDTH_PX}px !important;
+          min-width: ${PDF_PAGE_WIDTH_PX}px !important;
+          max-width: ${PDF_PAGE_WIDTH_PX}px !important;
+        }
+      }
+    `;
+
+    (document.head || document.documentElement).appendChild(style);
+    document.body.appendChild(container);
+
+    await waitForPrintAssets(clone, document, target, enhancedImageLoading);
+
+    let response;
+    try {
+      response = await sendRuntimeMessage({ type: "PRINT_TO_PDF_CDP" });
+    } finally {
+      cleanupPrintArtifacts();
+    }
+
+    if (!response || !response.ok || !response.base64) {
+      throw new Error((response && response.error) || "CDP print failed");
+    }
+
+    const binaryString = atob(response.base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i += 1) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    downloadBlob(new Blob([bytes], { type: "application/pdf" }), sanitizeFilename(document.title) + ".pdf");
+  }
+
+  async function exportElementToPdfViaHtml2Canvas(target) {
+    const libUrl = (name) => {
+      if (!api || !api.runtime || typeof api.runtime.getURL !== "function") {
+        throw new Error("runtime.getURL unavailable");
+      }
+      return api.runtime.getURL(`lib/${name}`);
+    };
+
+    const injectScript = async (name) => {
+      const url = libUrl(name);
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to load ${name}`);
+      }
+      const code = await response.text();
+      const blob = new Blob([code], { type: "application/javascript" });
+      const blobUrl = URL.createObjectURL(blob);
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = blobUrl;
+        script.onload = () => {
+          URL.revokeObjectURL(blobUrl);
+          resolve();
+        };
+        script.onerror = () => {
+          URL.revokeObjectURL(blobUrl);
+          reject(new Error(`Failed to inject ${name}`));
+        };
+        (document.head || document.documentElement).appendChild(script);
+      });
+    };
+
+    await injectScript("html2canvas.min.js");
+    await injectScript("pdf-lib.min.js");
+
+    const clone = target.cloneNode(true);
+    prepareClone(target, clone, {
+      inlineStyles: true,
+      stripStyles: false,
+      syncImages: true,
+      enhancedImages: enhancedImageLoading
+    });
+    await prepareMountedPrintRoot(target, clone);
+
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText = "position:absolute;left:-99999px;top:0;width:794px;z-index:-1;overflow:visible;background:#ffffff;";
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    try {
+      const eventId = `__web_exporter_pdf_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+
+      const result = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("html2canvas PDF generation timeout"));
+        }, 60000);
+
+        window.addEventListener(eventId, (e) => {
+          clearTimeout(timeout);
+          if (e.detail && e.detail.error) {
+            reject(new Error(e.detail.error));
+          } else {
+            resolve(e.detail);
+          }
+        }, { once: true });
+
+        const script = document.createElement("script");
+        script.textContent = `
+          (async () => {
+            const wrapper = document.querySelector('[data-web-exporter-pdf-id="${eventId}"]');
+            if (!wrapper || typeof html2canvas !== "function" || typeof PDFLib === "undefined") {
+              window.dispatchEvent(new CustomEvent("${eventId}", { detail: { error: "Libraries not loaded" } }));
+              return;
+            }
+            try {
+              const canvas = await html2canvas(wrapper, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
+              const a4Width = 595.28;
+              const a4Height = 841.89;
+              const pagePixelHeight = Math.floor(canvas.width * (a4Height / a4Width));
+              const pdfDoc = await PDFLib.PDFDocument.create();
+              let offsetY = 0;
+
+              while (offsetY < canvas.height) {
+                const sliceHeight = Math.min(pagePixelHeight, canvas.height - offsetY);
+                const sliceCanvas = document.createElement("canvas");
+                sliceCanvas.width = canvas.width;
+                sliceCanvas.height = sliceHeight;
+                const ctx = sliceCanvas.getContext("2d");
+                ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+
+                const dataUrl = sliceCanvas.toDataURL("image/png");
+                const base64Data = dataUrl.split(",")[1];
+                const pngBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+                const img = await pdfDoc.embedPng(pngBytes);
+
+                const page = pdfDoc.addPage([a4Width, a4Height]);
+                const drawWidth = a4Width;
+                const drawHeight = sliceHeight * (a4Width / canvas.width);
+                page.drawImage(img, { x: 0, y: a4Height - drawHeight, width: drawWidth, height: drawHeight });
+                offsetY += sliceHeight;
+              }
+
+              const pdfBytes = await pdfDoc.save();
+              const base64 = btoa(String.fromCharCode(...pdfBytes));
+              window.dispatchEvent(new CustomEvent("${eventId}", { detail: { base64 } }));
+            } catch (err) {
+              window.dispatchEvent(new CustomEvent("${eventId}", { detail: { error: err && err.message ? err.message : String(err) } }));
+            }
+          })();
+        `;
+        wrapper.setAttribute("data-web-exporter-pdf-id", eventId);
+        document.documentElement.appendChild(script);
+        script.remove();
+      });
+
+      wrapper.remove();
+
+      if (result.base64) {
+        const binaryString = atob(result.base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i += 1) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        downloadBlob(new Blob([bytes], { type: "application/pdf" }), sanitizeFilename(document.title) + ".pdf");
+      }
+    } catch (error) {
+      wrapper.remove();
+      throw error;
+    }
+  }
+
   async function exportElementToPdf(target) {
+    if (pdfEngine === "cdp") {
+      try {
+        await exportElementToPdfViaCdp(target);
+        return;
+      } catch (error) {
+        console.warn("CDP PDF export failed, falling back to native:", error);
+        alert(i18n.t("error.cdp_unavailable"));
+      }
+    }
+    if (pdfEngine === "html2canvas") {
+      try {
+        await exportElementToPdfViaHtml2Canvas(target);
+        return;
+      } catch (error) {
+        console.warn("html2canvas PDF export failed, falling back to native:", error);
+        alert(i18n.t("error.html2canvas_unavailable"));
+      }
+    }
     try {
       await printInPage(target, preserveStyles, enhancedImageLoading);
     } catch (error) {
@@ -3057,7 +3295,7 @@
       }
 
       if (message.type === "START_SELECTION") {
-        startSelection(message.preserveStyles, message.exportFormat, message.enhancedImageLoading, message.imagePackaging);
+        startSelection(message.preserveStyles, message.exportFormat, message.enhancedImageLoading, message.imagePackaging, message.pdfEngine);
         if (typeof sendResponse === "function") {
           sendResponse({ ok: true });
         }

@@ -78,3 +78,7 @@ button:hover {
   color: #cf4a45;
   min-height: 16px;
 }
+
+select option:disabled {
+  color: #a0a6b8;
+}

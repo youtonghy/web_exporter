@@ -19,6 +19,16 @@
         </select>
       </label>
 
+      <label class="field" id="pdfEngineRow" style="display: none;">
+        <span class="label" data-i18n="label.pdf_engine"></span>
+        <select id="pdfEngine">
+          <option value="native" data-i18n="option.pdf_engine.native"></option>
+          <option value="cdp" data-i18n="option.pdf_engine.cdp"></option>
+          <option value="html2canvas" data-i18n="option.pdf_engine.html2canvas"></option>
+        </select>
+      </label>
+      <p class="hint" id="pdfEngineHint" style="display: none;"></p>
+
       <label class="toggle" id="preserveStylesRow">
         <input id="preserveStyles" type="checkbox" checked />
         <span data-i18n="toggle.preserve_styles"></span>
