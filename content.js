@@ -2818,15 +2818,120 @@
     root.style.marginInlineEnd = "0";
   }
 
-  const PDF_PAGE_WIDTH_PX = 794;
-  const PDF_PAGE_HEIGHT_PX = 1123;
+  const CSS_PIXELS_PER_INCH = 96;
+  const PDF_POINTS_PER_INCH = 72;
+  const DEFAULT_PDF_PAGE_WIDTH_PX = 794;
+  const DEFAULT_PDF_PAGE_HEIGHT_PX = 1123;
 
-  function buildPdfPageRule(heightPx = PDF_PAGE_HEIGHT_PX) {
-    void heightPx;
-    return "@page { size: A4 portrait; margin: 0; }";
+  function normalizePdfPageDimensionPx(value, fallbackPx) {
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue) || numberValue <= 0) {
+      return fallbackPx;
+    }
+    return Math.ceil(numberValue);
   }
 
-  function buildPrintPayload(target, keepStyles, enhancedImages) {
+  function formatPdfLengthInches(px, fallbackPx) {
+    return Number((normalizePdfPageDimensionPx(px, fallbackPx) / CSS_PIXELS_PER_INCH).toFixed(4));
+  }
+
+  function buildPdfPageRule(widthPx = DEFAULT_PDF_PAGE_WIDTH_PX, heightPx = DEFAULT_PDF_PAGE_HEIGHT_PX) {
+    const widthIn = formatPdfLengthInches(widthPx, DEFAULT_PDF_PAGE_WIDTH_PX);
+    const heightIn = formatPdfLengthInches(heightPx, DEFAULT_PDF_PAGE_HEIGHT_PX);
+    return `@page { size: ${widthIn}in ${heightIn}in; margin: 0; }`;
+  }
+
+  function getElementRectSize(node) {
+    if (!isElementNode(node) || typeof node.getBoundingClientRect !== "function") {
+      return { width: 0, height: 0 };
+    }
+
+    const rect = node.getBoundingClientRect();
+    return {
+      width: rect && Number.isFinite(Number(rect.width)) ? Number(rect.width) : 0,
+      height: rect && Number.isFinite(Number(rect.height)) ? Number(rect.height) : 0
+    };
+  }
+
+  function measurePdfPageSize(root) {
+    const rect = getElementRectSize(root);
+    const widthPx = normalizePdfPageDimensionPx(
+      Math.max(Number(root && root.scrollWidth) || 0, Number(root && root.offsetWidth) || 0, Number(root && root.clientWidth) || 0, rect.width),
+      DEFAULT_PDF_PAGE_WIDTH_PX
+    );
+    const heightPx = normalizePdfPageDimensionPx(
+      Math.max(Number(root && root.scrollHeight) || 0, Number(root && root.offsetHeight) || 0, Number(root && root.clientHeight) || 0, rect.height),
+      DEFAULT_PDF_PAGE_HEIGHT_PX
+    );
+
+    return {
+      widthPx,
+      heightPx,
+      paperWidth: widthPx / CSS_PIXELS_PER_INCH,
+      paperHeight: heightPx / CSS_PIXELS_PER_INCH,
+      widthPt: widthPx * PDF_POINTS_PER_INCH / CSS_PIXELS_PER_INCH,
+      heightPt: heightPx * PDF_POINTS_PER_INCH / CSS_PIXELS_PER_INCH
+    };
+  }
+
+  function getStandardPdfPageSize() {
+    return measurePdfPageSize(null);
+  }
+
+  function applyPdfPageWidth(node, pageSize) {
+    if (!isElementNode(node) || !node.style || !pageSize) {
+      return;
+    }
+
+    node.style.width = `${pageSize.widthPx}px`;
+    node.style.minWidth = `${pageSize.widthPx}px`;
+    node.style.maxWidth = "none";
+  }
+
+  function buildPrintDocumentStyle(bodyStyle, pageSize) {
+    return `
+      ${buildPdfPageRule(pageSize.widthPx, pageSize.heightPx)}
+      html, body { margin: 0 !important; padding: 0 !important; }
+      body {
+        ${bodyStyle}
+        display: block !important;
+        width: ${pageSize.widthPx}px !important;
+        min-width: ${pageSize.widthPx}px !important;
+        max-width: none !important;
+      }
+      * { box-sizing: border-box; }
+    `;
+  }
+
+  function buildInPagePrintStyle(resetRules, pageSize) {
+    return `
+      ${resetRules}
+      ${buildPdfPageRule(pageSize.widthPx, pageSize.heightPx)}
+      @media print {
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          display: block !important;
+          max-width: none !important;
+          overflow: visible !important;
+        }
+        body > *:not(#${PRINT_CONTAINER_ID}) {
+          display: none !important;
+        }
+        #${PRINT_CONTAINER_ID} {
+          position: static !important;
+          inset: auto !important;
+          overflow: visible !important;
+          padding: 0 !important;
+          width: ${pageSize.widthPx}px !important;
+          min-width: ${pageSize.widthPx}px !important;
+          max-width: none !important;
+        }
+      }
+    `;
+  }
+
+  function buildPrintPayload(target, keepStyles, enhancedImages, singlePage = true) {
     const clone = target.cloneNode(true);
     prepareClone(target, clone, {
       inlineStyles: keepStyles,
@@ -2840,11 +2945,11 @@
       ? "margin:0;padding:0;background:#ffffff;"
       : "margin:0;padding:0;font-family:Arial, sans-serif;background:#ffffff;";
 
-    return { clone, baseHref, bodyStyle, sourceRoot: target };
+    return { clone, baseHref, bodyStyle, sourceRoot: target, pageSize: singlePage ? measurePdfPageSize(target) : getStandardPdfPageSize(), singlePage };
   }
 
   function populatePrintDocument(doc, payload) {
-    const { clone, baseHref, bodyStyle } = payload;
+    const { clone, baseHref, bodyStyle, pageSize } = payload;
 
     while (doc.head.firstChild) {
       doc.head.removeChild(doc.head.firstChild);
@@ -2870,18 +2975,7 @@
     }
 
     const style = doc.createElement("style");
-    style.textContent = `
-      ${buildPdfPageRule()}
-      html, body { margin: 0 !important; padding: 0 !important; }
-      body {
-        ${bodyStyle}
-        display: block !important;
-        width: ${PDF_PAGE_WIDTH_PX}px !important;
-        min-width: ${PDF_PAGE_WIDTH_PX}px !important;
-        max-width: ${PDF_PAGE_WIDTH_PX}px !important;
-      }
-      * { box-sizing: border-box; }
-    `;
+    style.textContent = buildPrintDocumentStyle(bodyStyle, pageSize);
     doc.head.appendChild(style);
     doc.title = i18n.t("print.window_title");
 
@@ -2904,7 +2998,7 @@
     }
 
     const doc = printWindow.document;
-    const { importedRoot } = populatePrintDocument(doc, payload);
+    const { importedRoot, styleEl } = populatePrintDocument(doc, payload);
 
     const triggerPrint = () => {
       try {
@@ -2918,7 +3012,12 @@
     const schedulePrint = () => {
       const printableRoot = isElementNode(importedRoot) ? importedRoot : doc.body.firstElementChild || doc.body;
       waitForPrintAssets(printableRoot, doc, payload.sourceRoot, enhancedImages)
-        .then(triggerPrint, triggerPrint);
+        .then(() => {
+          const pageSize = payload.singlePage === false ? getStandardPdfPageSize() : measurePdfPageSize(printableRoot);
+          applyPdfPageWidth(doc.body, pageSize);
+          styleEl.textContent = buildPrintDocumentStyle(payload.bodyStyle, pageSize);
+          triggerPrint();
+        }, triggerPrint);
     };
 
     if (doc.readyState === "complete") {
@@ -2985,7 +3084,7 @@
     ]).then(() => prepareMountedPrintRoot(sourceRoot || container, container).catch(() => undefined));
   }
 
-  async function printInPage(target, keepStyles, enhancedImages) {
+  async function printInPage(target, keepStyles, enhancedImages, singlePage = true) {
     cleanupPrintArtifacts();
 
     const clone = target.cloneNode(true);
@@ -2997,6 +3096,7 @@
     });
 
     const container = document.createElement("div");
+    const initialPageSize = singlePage ? measurePdfPageSize(target) : getStandardPdfPageSize();
     container.id = PRINT_CONTAINER_ID;
     container.style.position = "fixed";
     container.style.inset = "0";
@@ -3004,6 +3104,7 @@
     container.style.background = "#ffffff";
     container.style.padding = "16px";
     container.style.zIndex = "2147483647";
+    applyPdfPageWidth(container, initialPageSize);
     container.appendChild(clone);
 
     const style = document.createElement("style");
@@ -3022,31 +3123,7 @@
         }
       `;
 
-    style.textContent = `
-      ${resetRules}
-      ${buildPdfPageRule()}
-      @media print {
-        html, body {
-          margin: 0 !important;
-          padding: 0 !important;
-          display: block !important;
-          max-width: none !important;
-          overflow: visible !important;
-        }
-        body > *:not(#${PRINT_CONTAINER_ID}) {
-          display: none !important;
-        }
-        #${PRINT_CONTAINER_ID} {
-          position: static !important;
-          inset: auto !important;
-          overflow: visible !important;
-          padding: 0 !important;
-          width: ${PDF_PAGE_WIDTH_PX}px !important;
-          min-width: ${PDF_PAGE_WIDTH_PX}px !important;
-          max-width: ${PDF_PAGE_WIDTH_PX}px !important;
-        }
-      }
-    `;
+    style.textContent = buildInPagePrintStyle(resetRules, initialPageSize);
 
     (document.head || document.documentElement).appendChild(style);
     document.body.appendChild(container);
@@ -3057,7 +3134,22 @@
 
     window.addEventListener("afterprint", cleanup, { once: true });
     await waitForPrintAssets(clone, document, target, enhancedImages);
+    const pageSize = singlePage ? measurePdfPageSize(clone) : getStandardPdfPageSize();
+    applyPdfPageWidth(container, pageSize);
+    style.textContent = buildInPagePrintStyle(resetRules, pageSize);
     window.print();
+  }
+
+  async function exportElementToNativePdf(target, singlePage = true) {
+    try {
+      await printInPage(target, preserveStyles, enhancedImageLoading, singlePage);
+    } catch (error) {
+      const payload = buildPrintPayload(target, preserveStyles, enhancedImageLoading, singlePage);
+      const opened = openPrintWindow(payload, enhancedImageLoading);
+      if (!opened) {
+        alert(i18n.t("alert.print_blocked"));
+      }
+    }
   }
 
   async function exportElementToPdfViaCdp(target) {
@@ -3072,6 +3164,7 @@
     });
 
     const container = document.createElement("div");
+    const initialPageSize = measurePdfPageSize(target);
     container.id = PRINT_CONTAINER_ID;
     container.style.position = "fixed";
     container.style.inset = "0";
@@ -3079,6 +3172,7 @@
     container.style.background = "#ffffff";
     container.style.padding = "16px";
     container.style.zIndex = "2147483647";
+    applyPdfPageWidth(container, initialPageSize);
     container.appendChild(clone);
 
     const style = document.createElement("style");
@@ -3097,40 +3191,23 @@
         }
       `;
 
-    style.textContent = `
-      ${resetRules}
-      ${buildPdfPageRule()}
-      @media print {
-        html, body {
-          margin: 0 !important;
-          padding: 0 !important;
-          display: block !important;
-          max-width: none !important;
-          overflow: visible !important;
-        }
-        body > *:not(#${PRINT_CONTAINER_ID}) {
-          display: none !important;
-        }
-        #${PRINT_CONTAINER_ID} {
-          position: static !important;
-          inset: auto !important;
-          overflow: visible !important;
-          padding: 0 !important;
-          width: ${PDF_PAGE_WIDTH_PX}px !important;
-          min-width: ${PDF_PAGE_WIDTH_PX}px !important;
-          max-width: ${PDF_PAGE_WIDTH_PX}px !important;
-        }
-      }
-    `;
+    style.textContent = buildInPagePrintStyle(resetRules, initialPageSize);
 
     (document.head || document.documentElement).appendChild(style);
     document.body.appendChild(container);
 
     await waitForPrintAssets(clone, document, target, enhancedImageLoading);
+    const pageSize = measurePdfPageSize(clone);
+    applyPdfPageWidth(container, pageSize);
+    style.textContent = buildInPagePrintStyle(resetRules, pageSize);
 
     let response;
     try {
-      response = await sendRuntimeMessage({ type: "PRINT_TO_PDF_CDP" });
+      response = await sendRuntimeMessage({
+        type: "PRINT_TO_PDF_CDP",
+        paperWidth: pageSize.paperWidth,
+        paperHeight: pageSize.paperHeight
+      });
     } finally {
       cleanupPrintArtifacts();
     }
@@ -3189,12 +3266,15 @@
       syncImages: true,
       enhancedImages: enhancedImageLoading
     });
-    await prepareMountedPrintRoot(target, clone);
 
     const wrapper = document.createElement("div");
-    wrapper.style.cssText = "position:absolute;left:-99999px;top:0;width:794px;z-index:-1;overflow:visible;background:#ffffff;";
+    const initialPageSize = measurePdfPageSize(target);
+    wrapper.style.cssText = `position:absolute;left:-99999px;top:0;width:${initialPageSize.widthPx}px;z-index:-1;overflow:visible;background:#ffffff;`;
     wrapper.appendChild(clone);
     document.body.appendChild(wrapper);
+    await prepareMountedPrintRoot(target, clone);
+    const pageSize = measurePdfPageSize(clone);
+    applyPdfPageWidth(wrapper, pageSize);
 
     try {
       const eventId = `__web_exporter_pdf_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
@@ -3222,32 +3302,25 @@
               return;
             }
             try {
-              const canvas = await html2canvas(wrapper, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
-              const a4Width = 595.28;
-              const a4Height = 841.89;
-              const pagePixelHeight = Math.floor(canvas.width * (a4Height / a4Width));
+              const renderScale = 2;
+              const pointsPerCssPixel = ${PDF_POINTS_PER_INCH / CSS_PIXELS_PER_INCH};
+              const canvas = await html2canvas(wrapper, {
+                scale: renderScale,
+                useCORS: true,
+                backgroundColor: "#ffffff",
+                logging: false,
+                windowWidth: ${pageSize.widthPx},
+                windowHeight: ${pageSize.heightPx}
+              });
               const pdfDoc = await PDFLib.PDFDocument.create();
-              let offsetY = 0;
-
-              while (offsetY < canvas.height) {
-                const sliceHeight = Math.min(pagePixelHeight, canvas.height - offsetY);
-                const sliceCanvas = document.createElement("canvas");
-                sliceCanvas.width = canvas.width;
-                sliceCanvas.height = sliceHeight;
-                const ctx = sliceCanvas.getContext("2d");
-                ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
-
-                const dataUrl = sliceCanvas.toDataURL("image/png");
-                const base64Data = dataUrl.split(",")[1];
-                const pngBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-                const img = await pdfDoc.embedPng(pngBytes);
-
-                const page = pdfDoc.addPage([a4Width, a4Height]);
-                const drawWidth = a4Width;
-                const drawHeight = sliceHeight * (a4Width / canvas.width);
-                page.drawImage(img, { x: 0, y: a4Height - drawHeight, width: drawWidth, height: drawHeight });
-                offsetY += sliceHeight;
-              }
+              const dataUrl = canvas.toDataURL("image/png");
+              const base64Data = dataUrl.split(",")[1];
+              const pngBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+              const img = await pdfDoc.embedPng(pngBytes);
+              const pageWidth = (canvas.width / renderScale) * pointsPerCssPixel;
+              const pageHeight = (canvas.height / renderScale) * pointsPerCssPixel;
+              const page = pdfDoc.addPage([pageWidth, pageHeight]);
+              page.drawImage(img, { x: 0, y: 0, width: pageWidth, height: pageHeight });
 
               const pdfBytes = await pdfDoc.save();
               const base64 = btoa(String.fromCharCode(...pdfBytes));
@@ -3286,6 +3359,8 @@
       } catch (error) {
         console.warn("CDP PDF export failed, falling back to native:", error);
         alert(i18n.t("error.cdp_unavailable"));
+        await exportElementToNativePdf(target, false);
+        return;
       }
     }
     if (pdfEngine === "html2canvas") {
@@ -3295,17 +3370,11 @@
       } catch (error) {
         console.warn("html2canvas PDF export failed, falling back to native:", error);
         alert(i18n.t("error.html2canvas_unavailable"));
+        await exportElementToNativePdf(target, false);
+        return;
       }
     }
-    try {
-      await printInPage(target, preserveStyles, enhancedImageLoading);
-    } catch (error) {
-      const payload = buildPrintPayload(target, preserveStyles, enhancedImageLoading);
-      const opened = openPrintWindow(payload, enhancedImageLoading);
-      if (!opened) {
-        alert(i18n.t("alert.print_blocked"));
-      }
-    }
+    await exportElementToNativePdf(target, true);
   }
 
   function exportElementToMarkdown(target) {
@@ -3365,6 +3434,7 @@
       isMathRoot,
       isCodeBlockRoot,
       buildPdfPageRule,
+      measurePdfPageSize,
       normalizePrintRootLayout,
       prepareClone,
       prepareMountedPrintRoot,

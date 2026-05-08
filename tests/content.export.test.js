@@ -955,11 +955,39 @@ test("reuses measured heights within the same cache", () => {
   assert.equal(refreshed, 999);
 });
 
-test("builds a standard portrait A4 page rule", () => {
+test("builds a custom one-page PDF page rule", () => {
   const hooks = loadContentHooks();
 
-  assert.equal(hooks.buildPdfPageRule(), "@page { size: A4 portrait; margin: 0; }");
-  assert.equal(hooks.buildPdfPageRule(640), "@page { size: A4 portrait; margin: 0; }");
+  assert.equal(hooks.buildPdfPageRule(), "@page { size: 8.2708in 11.6979in; margin: 0; }");
+  assert.equal(hooks.buildPdfPageRule(794, 2400), "@page { size: 8.2708in 25in; margin: 0; }");
+});
+
+test("measures PDF page size from full content dimensions", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const root = createElement("section", ownerDocument);
+  root.scrollWidth = 1280;
+  root.clientWidth = 800;
+  root.offsetWidth = 960;
+  root.scrollHeight = 2600;
+  root.clientHeight = 900;
+  root.offsetHeight = 1000;
+  root.getBoundingClientRect = () => ({ width: 1024, height: 1200 });
+
+  const pageSize = hooks.measurePdfPageSize(root);
+
+  assert.equal(pageSize.widthPx, 1280);
+  assert.equal(pageSize.heightPx, 2600);
+  assert.equal(pageSize.paperWidth, 1280 / 96);
+  assert.equal(pageSize.paperHeight, 2600 / 96);
+});
+
+test("html2canvas PDF export creates one page instead of A4 slices", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "content.js"), "utf8");
+
+  assert.match(source, /pdfDoc\.addPage\(\[pageWidth, pageHeight\]\)/);
+  assert.doesNotMatch(source, /pagePixelHeight/);
+  assert.doesNotMatch(source, /while \(offsetY < canvas\.height\)/);
 });
 
 test("normalizes print root layout to remove centered margins", () => {

@@ -1,4 +1,14 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
+const DEFAULT_PAPER_WIDTH_IN = 8.27;
+const DEFAULT_PAPER_HEIGHT_IN = 11.69;
+
+function normalizePaperDimension(value, fallback) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    return fallback;
+  }
+  return numberValue;
+}
 
 function captureVisibleTab(windowId) {
   if (!api || !api.tabs || typeof api.tabs.captureVisibleTab !== "function") {
@@ -29,7 +39,7 @@ function captureVisibleTab(windowId) {
   });
 }
 
-function printToPdfCdp(sender, sendResponse) {
+function printToPdfCdp(sender, sendResponse, options = {}) {
   const tabId = sender && sender.tab ? sender.tab.id : undefined;
   if (!tabId) {
     sendResponse({ ok: false, error: "No active tab" });
@@ -44,8 +54,8 @@ function printToPdfCdp(sender, sendResponse) {
   api.debugger.attach(debuggee, "1.3")
     .then(() => api.debugger.sendCommand(debuggee, "Page.printToPDF", {
       printBackground: true,
-      paperWidth: 8.27,
-      paperHeight: 11.69,
+      paperWidth: normalizePaperDimension(options.paperWidth, DEFAULT_PAPER_WIDTH_IN),
+      paperHeight: normalizePaperDimension(options.paperHeight, DEFAULT_PAPER_HEIGHT_IN),
       marginTop: 0,
       marginBottom: 0,
       marginLeft: 0,
@@ -82,8 +92,15 @@ if (api && api.runtime && api.runtime.onMessage) {
     }
 
     if (message.type === "PRINT_TO_PDF_CDP") {
-      printToPdfCdp(sender, sendResponse);
+      printToPdfCdp(sender, sendResponse, message);
       return true;
     }
   });
+}
+
+if (globalThis.__WEB_EXPORTER_TEST_HOOKS__) {
+  globalThis.__WEB_EXPORTER_TEST_HOOKS__ = {
+    normalizePaperDimension,
+    printToPdfCdp
+  };
 }
