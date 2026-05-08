@@ -13,6 +13,7 @@ const enhancedToggle = document.getElementById("enhancedImageLoading");
 const enhancedRow = document.getElementById("enhancedImageLoadingRow");
 const imagePackagingToggle = document.getElementById("imagePackaging");
 const imagePackagingRow = document.getElementById("imagePackagingRow");
+const debugModeToggle = document.getElementById("debugMode");
 const selectButton = document.getElementById("selectAndExport");
 let lastPreserveValue = preserveToggle.checked;
 let lastEnhancedValue = enhancedToggle.checked;
@@ -221,7 +222,8 @@ selectButton.addEventListener("click", async () => {
       exportFormat: formatSelect.value,
       enhancedImageLoading: enhancedToggle.checked,
       imagePackaging: imagePackagingToggle.checked,
-      pdfEngine: formatSelect.value === "pdf" ? pdfEngineSelect.value : undefined
+      pdfEngine: formatSelect.value === "pdf" ? pdfEngineSelect.value : undefined,
+      debugMode: debugModeToggle.checked
     };
 
     try {

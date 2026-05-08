@@ -207,6 +207,7 @@
   let enhancedImageLoading = false;
   let imagePackaging = false;
   let pdfEngine = "native";
+  let debugMode = false;
   let lastHighlighted = null;
   let overlay = null;
 
@@ -359,7 +360,7 @@
     return mathRoot || element;
   }
 
-  function startSelection(keepStyles, format, enhancedImages, packImages, engine) {
+  function startSelection(keepStyles, format, enhancedImages, packImages, engine, debug) {
     if (selecting) {
       return;
     }
@@ -368,6 +369,7 @@
     enhancedImageLoading = Boolean(enhancedImages);
     imagePackaging = Boolean(packImages);
     pdfEngine = engine === "cdp" ? "cdp" : engine === "html2canvas" ? "html2canvas" : "native";
+    debugMode = Boolean(debug);
     selecting = true;
     ensureStyleTag();
     createOverlay();
@@ -414,6 +416,9 @@
     event.stopImmediatePropagation();
 
     stopSelection();
+    if (debugMode) {
+      console.info("[web_exporter] selected target", summarizeNodeForDebug(target, createNodeMeasureCache()));
+    }
     if (exportFormat === "markdown") {
       exportElementToMarkdown(target);
     } else if (exportFormat === "png") {
@@ -455,9 +460,17 @@
     };
   }
 
-  function getCachedComputedStyle(node, cache) {
+  function getCachedComputedStyle(node, cache, pseudo) {
     if (!isElementNode(node)) {
       return null;
+    }
+
+    if (pseudo) {
+      try {
+        return window.getComputedStyle(node, pseudo);
+      } catch (e) {
+        return null;
+      }
     }
 
     const styleCache = cache && cache.computedStyles;
@@ -1868,6 +1881,144 @@
     return base.replace(/[\\/:*?"<>|]+/g, "_");
   }
 
+  function truncateString(value, maxLength) {
+    const text = String(value || "");
+    const limit = Math.max(0, Number(maxLength) || 0);
+    if (!limit || text.length <= limit) {
+      return text;
+    }
+    return text.slice(0, limit) + "…";
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function getAttributeEntries(node) {
+    if (!node || !node.attributes) {
+      return [];
+    }
+    if (typeof node.attributes[Symbol.iterator] === "function") {
+      return Array.from(node.attributes).map((attribute) => [attribute.name, attribute.value]);
+    }
+    return Object.entries(node.attributes);
+  }
+
+  function serializeNodeForDebug(node, maxLength = 12000) {
+    if (!node) {
+      return "";
+    }
+
+    if (typeof node.outerHTML === "string") {
+      return truncateString(node.outerHTML, maxLength);
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeHtml(node.nodeValue || "");
+    }
+
+    if (!isElementNode(node)) {
+      return truncateString(String(node.textContent || ""), maxLength);
+    }
+
+    const tagName = getElementTagName(node);
+    const attributes = getAttributeEntries(node)
+      .map(([name, value]) => `${name}="${escapeHtml(value)}"`)
+      .join(" ");
+    const openingTag = attributes ? `<${tagName} ${attributes}>` : `<${tagName}>`;
+    const closingTag = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"].includes(tagName)
+      ? ""
+      : `</${tagName}>`;
+    const children = Array.from(node.childNodes || [])
+      .map((child) => serializeNodeForDebug(child, maxLength))
+      .join("");
+    return truncateString(`${openingTag}${children}${closingTag}`, maxLength);
+  }
+
+  function getDebugNodePath(node) {
+    if (!isElementNode(node)) {
+      return "";
+    }
+
+    const segments = [];
+    let current = node;
+    while (isElementNode(current)) {
+      let segment = getElementTagName(current);
+      const id = getAttributeValue(current, "id");
+      if (id) {
+        segment += `#${id}`;
+      }
+      const className = getAttributeValue(current, "class");
+      if (className) {
+        segment += `.${className.trim().split(/\s+/).filter(Boolean).join(".")}`;
+      }
+      segments.unshift(segment);
+      current = current.parentNode;
+    }
+
+    return segments.join(" > ");
+  }
+
+  function summarizeNodeForDebug(node, cache) {
+    if (!isElementNode(node)) {
+      return {
+        tagName: "",
+        path: "",
+        text: ""
+      };
+    }
+
+    const computed = getCachedComputedStyle(node, cache);
+    return {
+      tagName: getElementTagName(node),
+      path: getDebugNodePath(node),
+      id: getAttributeValue(node, "id") || "",
+      className: getAttributeValue(node, "class") || "",
+      text: truncateString((node.textContent || "").replace(/\s+/g, " ").trim(), 240),
+      display: computed && typeof computed.display === "string" ? computed.display : "",
+      visibility: computed && typeof computed.visibility === "string" ? computed.visibility : "",
+      opacity: computed && computed.opacity != null ? String(computed.opacity) : "",
+      whiteSpace: computed && typeof computed.whiteSpace === "string" ? computed.whiteSpace : "",
+      overflow: computed && typeof computed.overflow === "string" ? computed.overflow : "",
+      overflowY: computed && typeof computed.overflowY === "string" ? computed.overflowY : "",
+      width: computed && typeof computed.width === "string" ? computed.width : "",
+      height: computed && typeof computed.height === "string" ? computed.height : "",
+      scrollHeight: Number(node.scrollHeight) || 0,
+      clientHeight: Number(node.clientHeight) || 0,
+      offsetHeight: Number(node.offsetHeight) || 0
+    };
+  }
+
+  function buildDebugReport(kind, target, preparedRoot, extras = {}) {
+    const cache = createNodeMeasureCache();
+    return {
+      kind,
+      title: document.title,
+      url: typeof location !== "undefined" ? location.href : "",
+      timestamp: new Date().toISOString(),
+      target: summarizeNodeForDebug(target, cache),
+      prepared: summarizeNodeForDebug(preparedRoot, cache),
+      targetHtml: serializeNodeForDebug(target),
+      preparedHtml: serializeNodeForDebug(preparedRoot),
+      ...extras
+    };
+  }
+
+  function emitDebugReport(kind, target, preparedRoot, extras = {}) {
+    const report = buildDebugReport(kind, target, preparedRoot, extras);
+    const filename = `${sanitizeFilename(document.title)}-${kind}-debug-${Date.now()}.json`;
+    console.groupCollapsed(`[web_exporter] ${kind} debug`);
+    console.info(report);
+    console.groupEnd();
+    downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: "application/json;charset=utf-8" }), filename);
+    return report;
+  }
+
   function downloadMarkdown(content, filename) {
     const blob = new Blob([content || ""], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1969,6 +2120,21 @@
     if (right <= left || bottom <= top) {
       alert(i18n.t("alert.png_not_visible"));
       return;
+    }
+
+    if (debugMode) {
+      emitDebugReport("png", target, target, {
+        selectionRect: {
+          left,
+          top,
+          right,
+          bottom
+        },
+        viewport: {
+          width: viewportWidth,
+          height: viewportHeight
+        }
+      });
     }
 
     const dataUrl = await captureVisibleTabPng();
@@ -2101,6 +2267,12 @@
           inlineStyleSubset(sourceNode, cloneNode, context.cache, CODE_FIDELITY_STYLE_PROPERTIES);
         } else if (shouldInlineComputedStyles(sourceNode)) {
           inlineStyleSubset(sourceNode, cloneNode, context.cache);
+        } else if (isElementNode(sourceNode)) {
+          inlineStyleSubset(sourceNode, cloneNode, context.cache, [
+            "display", "visibility", "color", "font-family", "font-size",
+            "font-style", "font-weight", "line-height", "text-align",
+            "background-color", "margin", "padding"
+          ]);
         }
       }
 
@@ -2888,6 +3060,67 @@
     node.style.maxWidth = "none";
   }
 
+  function collectPageStyles() {
+    const inlineStyles = [];
+    const externalLinks = [];
+
+    try {
+      for (const sheet of document.styleSheets) {
+        if (!sheet) {
+          continue;
+        }
+
+        let rulesText = "";
+        let accessible = true;
+        try {
+          if (sheet.cssRules) {
+            for (const rule of sheet.cssRules) {
+              rulesText += rule.cssText + "\n";
+            }
+          }
+        } catch (e) {
+          accessible = false;
+          if (sheet.href) {
+            externalLinks.push({
+              href: sheet.href,
+              media: sheet.media && sheet.media.mediaText ? sheet.media.mediaText : ""
+            });
+          }
+        }
+
+        if (accessible && rulesText.trim()) {
+          inlineStyles.push(rulesText.trim());
+        }
+      }
+    } catch (e) {
+      // Ignore failures to access document.styleSheets.
+    }
+
+    try {
+      if (document.adoptedStyleSheets && document.adoptedStyleSheets.length) {
+        for (const sheet of document.adoptedStyleSheets) {
+          let rulesText = "";
+          try {
+            if (sheet.cssRules) {
+              for (const rule of sheet.cssRules) {
+                rulesText += rule.cssText + "\n";
+              }
+            }
+          } catch (e) {
+            // Ignore unreadable adopted sheets.
+          }
+          if (rulesText.trim()) {
+            inlineStyles.push(rulesText.trim());
+          }
+        }
+      }
+    } catch (e) {
+      // Ignore adoptedStyleSheets access failures.
+    }
+
+    return { inlineStyles, externalLinks };
+  }
+
   function buildPrintDocumentStyle(bodyStyle, pageSize) {
     return `
       ${buildPdfPageRule(pageSize.widthPx, pageSize.heightPx)}
@@ -2945,11 +3178,11 @@
       ? "margin:0;padding:0;background:#ffffff;"
       : "margin:0;padding:0;font-family:Arial, sans-serif;background:#ffffff;";
 
-    return { clone, baseHref, bodyStyle, sourceRoot: target, pageSize: singlePage ? measurePdfPageSize(target) : getStandardPdfPageSize(), singlePage };
+    return { clone, baseHref, bodyStyle, sourceRoot: target, pageSize: singlePage ? measurePdfPageSize(target) : getStandardPdfPageSize(), singlePage, pageStyles: collectPageStyles() };
   }
 
   function populatePrintDocument(doc, payload) {
-    const { clone, baseHref, bodyStyle, pageSize } = payload;
+    const { clone, baseHref, bodyStyle, pageSize, pageStyles } = payload;
 
     while (doc.head.firstChild) {
       doc.head.removeChild(doc.head.firstChild);
@@ -2972,6 +3205,23 @@
       const base = doc.createElement("base");
       base.setAttribute("href", baseHref);
       doc.head.appendChild(base);
+    }
+
+    if (pageStyles) {
+      for (const link of pageStyles.externalLinks) {
+        const linkEl = doc.createElement("link");
+        linkEl.setAttribute("rel", "stylesheet");
+        linkEl.setAttribute("href", link.href);
+        if (link.media) {
+          linkEl.setAttribute("media", link.media);
+        }
+        doc.head.appendChild(linkEl);
+      }
+      for (const cssText of pageStyles.inlineStyles) {
+        const styleEl = doc.createElement("style");
+        styleEl.textContent = cssText;
+        doc.head.appendChild(styleEl);
+      }
     }
 
     const style = doc.createElement("style");
@@ -3114,12 +3364,18 @@
       : `
         #${PRINT_CONTAINER_ID},
         #${PRINT_CONTAINER_ID} * {
-          all: revert;
+          margin: 0;
+          padding: 0;
+          border: 0;
+          font-size: 100%;
+          font: inherit;
+          vertical-align: baseline;
+          background: transparent;
+          color: #111111;
         }
         #${PRINT_CONTAINER_ID} {
           font-family: Arial, sans-serif;
           font-size: 14px;
-          color: #111111;
         }
       `;
 
@@ -3137,6 +3393,13 @@
     const pageSize = singlePage ? measurePdfPageSize(clone) : getStandardPdfPageSize();
     applyPdfPageWidth(container, pageSize);
     style.textContent = buildInPagePrintStyle(resetRules, pageSize);
+    if (debugMode) {
+      emitDebugReport("pdf-native", target, clone, {
+        pageSize,
+        singlePage,
+        keepStyles
+      });
+    }
     window.print();
   }
 
@@ -3145,6 +3408,13 @@
       await printInPage(target, preserveStyles, enhancedImageLoading, singlePage);
     } catch (error) {
       const payload = buildPrintPayload(target, preserveStyles, enhancedImageLoading, singlePage);
+      if (debugMode) {
+        emitDebugReport("pdf-native", target, payload.clone, {
+          pageSize: payload.pageSize,
+          singlePage: payload.singlePage,
+          preserveStyles
+        });
+      }
       const opened = openPrintWindow(payload, enhancedImageLoading);
       if (!opened) {
         alert(i18n.t("alert.print_blocked"));
@@ -3182,12 +3452,18 @@
       : `
         #${PRINT_CONTAINER_ID},
         #${PRINT_CONTAINER_ID} * {
-          all: revert;
+          margin: 0;
+          padding: 0;
+          border: 0;
+          font-size: 100%;
+          font: inherit;
+          vertical-align: baseline;
+          background: transparent;
+          color: #111111;
         }
         #${PRINT_CONTAINER_ID} {
           font-family: Arial, sans-serif;
           font-size: 14px;
-          color: #111111;
         }
       `;
 
@@ -3200,6 +3476,13 @@
     const pageSize = measurePdfPageSize(clone);
     applyPdfPageWidth(container, pageSize);
     style.textContent = buildInPagePrintStyle(resetRules, pageSize);
+
+    if (debugMode) {
+      emitDebugReport("pdf-cdp", target, clone, {
+        pageSize,
+        preserveStyles
+      });
+    }
 
     let response;
     try {
@@ -3275,6 +3558,13 @@
     await prepareMountedPrintRoot(target, clone);
     const pageSize = measurePdfPageSize(clone);
     applyPdfPageWidth(wrapper, pageSize);
+
+    if (debugMode) {
+      emitDebugReport("pdf-html2canvas", target, clone, {
+        pageSize,
+        preserveStyles
+      });
+    }
 
     try {
       const eventId = `__web_exporter_pdf_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
@@ -3405,6 +3695,7 @@
 
   if (globalThis.__WEB_EXPORTER_TEST_HOOKS__) {
     globalThis.__WEB_EXPORTER_TEST_HOOKS__ = {
+      buildDebugReport,
       applyEdAmberCodeBlockFormatting,
       applyEdPrintPairOverrides,
       applyGenericCodeBlockFormatting,
@@ -3439,7 +3730,9 @@
       prepareClone,
       prepareMountedPrintRoot,
       resolveMarkdownPackagingAssets,
-      resolveSelectableTarget
+      resolveSelectableTarget,
+      serializeNodeForDebug,
+      summarizeNodeForDebug
     };
   }
 
@@ -3453,7 +3746,7 @@
       }
 
       if (message.type === "START_SELECTION") {
-        startSelection(message.preserveStyles, message.exportFormat, message.enhancedImageLoading, message.imagePackaging, message.pdfEngine);
+        startSelection(message.preserveStyles, message.exportFormat, message.enhancedImageLoading, message.imagePackaging, message.pdfEngine, message.debugMode);
         if (typeof sendResponse === "function") {
           sendResponse({ ok: true });
         }

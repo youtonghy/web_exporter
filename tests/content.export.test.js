@@ -19,6 +19,34 @@ class MockNode {
     this.childNodes = [];
   }
 
+  cloneNode(deep = false) {
+    if (this.nodeType === 3) {
+      return new MockTextNode(this.nodeValue, this.ownerDocument);
+    }
+
+    const clone = new this.constructor(this.tagName ? this.tagName.toLowerCase() : "div", this.ownerDocument, { ...this.attributes });
+    if (this.style && clone.style) {
+      Object.assign(clone.style, this.style);
+      if (this.style.__priorities) {
+        clone.style.__priorities = { ...this.style.__priorities };
+      }
+    }
+    if (this.__computedStyle) {
+      clone.__computedStyle = { ...this.__computedStyle };
+    }
+    clone.scrollHeight = this.scrollHeight;
+    clone.clientHeight = this.clientHeight;
+    clone.offsetHeight = this.offsetHeight;
+
+    if (deep) {
+      this.childNodes.forEach((child) => {
+        clone.appendChild(child.cloneNode(true));
+      });
+    }
+
+    return clone;
+  }
+
   appendChild(child) {
     child.parentNode = this;
     child.ownerDocument = this.ownerDocument;
@@ -899,6 +927,28 @@ test("prepareClone preserves Ed Amber token and line number styles", () => {
   assert.match(inlineStyleText(clone.screenLineNumber), /display:inline-block;/);
   assert.match(inlineStyleText(clone.screenLineNumber), /min-width:24px;/);
   assert.match(inlineStyleText(clone.screenLineNumber), /text-align:right;/);
+});
+
+test("builds a debug report with node summary and HTML snippets", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createElement("div", ownerDocument, { id: "code-root", class: "snippet" });
+  const block = createElement("pre", ownerDocument);
+  block.appendChild(text("class Program {}", ownerDocument));
+  source.appendChild(block);
+  const clone = source.cloneNode(true);
+
+  const report = hooks.buildDebugReport("pdf-native", source, clone, {
+    pageSize: { widthPx: 800, heightPx: 600 }
+  });
+
+  assert.equal(report.kind, "pdf-native");
+  assert.equal(report.target.tagName, "div");
+  assert.match(report.target.path, /div#code-root\.snippet/);
+  assert.match(report.targetHtml, /<div[^>]*id="code-root"[^>]*class="snippet">/);
+  assert.match(report.targetHtml, /<pre>class Program \{\}<\/pre>/);
+  assert.match(report.preparedHtml, /<div[^>]*id="code-root"[^>]*class="snippet">/);
+  assert.equal(report.pageSize.widthPx, 800);
 });
 
 test("expands generic div code block containers with hidden overflow", async () => {
