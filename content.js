@@ -113,6 +113,62 @@
     "transform",
     "transform-origin"
   ];
+  const CODE_FIDELITY_STYLE_PROPERTIES = Array.from(new Set([
+    ...INLINE_STYLE_PROPERTIES,
+    "align-content",
+    "align-items",
+    "align-self",
+    "appearance",
+    "box-shadow",
+    "column-gap",
+    "flex",
+    "flex-basis",
+    "flex-direction",
+    "flex-flow",
+    "flex-grow",
+    "flex-shrink",
+    "flex-wrap",
+    "font-feature-settings",
+    "font-kerning",
+    "font-optical-sizing",
+    "font-variant",
+    "font-variant-caps",
+    "font-variant-east-asian",
+    "font-variant-ligatures",
+    "font-variant-numeric",
+    "gap",
+    "grid",
+    "grid-area",
+    "grid-auto-columns",
+    "grid-auto-flow",
+    "grid-auto-rows",
+    "grid-column",
+    "grid-column-end",
+    "grid-column-gap",
+    "grid-column-start",
+    "grid-row",
+    "grid-row-end",
+    "grid-row-gap",
+    "grid-row-start",
+    "grid-template",
+    "grid-template-areas",
+    "grid-template-columns",
+    "grid-template-rows",
+    "justify-content",
+    "justify-items",
+    "justify-self",
+    "outline",
+    "outline-color",
+    "outline-offset",
+    "outline-style",
+    "outline-width",
+    "place-content",
+    "place-items",
+    "place-self",
+    "row-gap",
+    "tab-size",
+    "text-shadow"
+  ]));
   const INLINE_STYLE_TAGS = new Set([
     "article",
     "aside",
@@ -416,14 +472,14 @@
     return computed;
   }
 
-  function inlineStyleSubset(source, target, cache) {
+  function inlineStyleSubset(source, target, cache, properties = INLINE_STYLE_PROPERTIES) {
     const computed = getCachedComputedStyle(source, cache);
     if (!computed) {
       return;
     }
 
     const declarations = [];
-    INLINE_STYLE_PROPERTIES.forEach((prop) => {
+    properties.forEach((prop) => {
       const value = computed.getPropertyValue(prop);
       if (value) {
         declarations.push(`${prop}:${value};`);
@@ -462,6 +518,34 @@
 
   function sourceHasClassOrStyle(node) {
     return Boolean(getAttributeValue(node, "class") || getAttributeValue(node, "style"));
+  }
+
+  function isCodeFidelityNode(node) {
+    if (!isElementNode(node)) {
+      return false;
+    }
+
+    const tag = getElementTagName(node);
+    if (tag === "code" || tag === "pre") {
+      return true;
+    }
+
+    if (isEdAmberCodeBlockNode(node) || isGenericTextCodeBlock(node)) {
+      return true;
+    }
+
+    return Boolean(getGenericCodeBlockRoot(node) || closestEdAmberCodeBlockNode(node));
+  }
+
+  function closestEdAmberCodeBlockNode(node) {
+    let current = node;
+    while (current && isElementNode(current)) {
+      if (isEdAmberCodeBlockNode(current)) {
+        return current;
+      }
+      current = current.parentNode;
+    }
+    return null;
   }
 
   function hasElementChildren(node) {
@@ -2012,8 +2096,12 @@
         continue;
       }
 
-      if (inlineStyles && shouldInlineComputedStyles(sourceNode)) {
-        inlineStyleSubset(sourceNode, cloneNode, context.cache);
+      if (inlineStyles) {
+        if (isCodeFidelityNode(sourceNode)) {
+          inlineStyleSubset(sourceNode, cloneNode, context.cache, CODE_FIDELITY_STYLE_PROPERTIES);
+        } else if (shouldInlineComputedStyles(sourceNode)) {
+          inlineStyleSubset(sourceNode, cloneNode, context.cache);
+        }
       }
 
       applyClonePreparationStep(sourceNode, cloneNode, context);

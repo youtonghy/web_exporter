@@ -347,6 +347,10 @@ function setComputedStyle(node, values = {}) {
   };
 }
 
+function inlineStyleText(node) {
+  return node.getAttribute("style") || "";
+}
+
 function createMonacoSnippet(ownerDocument) {
   const snippet = createElement("div", ownerDocument, { class: "snippet ed-print-hidden" });
   const snipInner = createElement("div", ownerDocument, { class: "snip-inner" });
@@ -414,14 +418,25 @@ function createMonacoSnippet(ownerDocument) {
 
 function createGenericCodeBlock(ownerDocument) {
   const wrapper = createElement("div", ownerDocument, { class: "amber-el amber-pre" });
+  const toolbar = createElement("div", ownerDocument, { class: "code-toolbar" });
+  const runButton = createElement("button", ownerDocument, { class: "run-button" });
   const content = createElement("div", ownerDocument, { class: "syntax-highlight" });
-  content.appendChild(
-    text(
-      "Total time: 100\nNumber of drones: 2\nNumber of lanterns: 15\nDrones (starting location):\n1\n10\nLanterns (location, arrival time):\n1 1\n1 2\n1 3\n1 4\n1 5\n",
-      ownerDocument
-    )
-  );
+  const inlineCode = createElement("code", ownerDocument);
+  const keyword = createElement("span", ownerDocument, { class: "token keyword" });
+  const stringToken = createElement("span", ownerDocument, { class: "token string" });
+
+  runButton.appendChild(text("Run", ownerDocument));
+  toolbar.appendChild(runButton);
+  inlineCode.appendChild(text("Program.java", ownerDocument));
+  keyword.appendChild(text("class", ownerDocument));
+  stringToken.appendChild(text('"Hello World!"', ownerDocument));
+  content.appendChild(keyword);
+  content.appendChild(text(" Program {\n  System.out.println(", ownerDocument));
+  content.appendChild(stringToken);
+  content.appendChild(text(");\n}\n", ownerDocument));
   wrapper.appendChild(content);
+  wrapper.appendChild(inlineCode);
+  wrapper.appendChild(toolbar);
 
   wrapper.clientHeight = 80;
   wrapper.offsetHeight = 80;
@@ -448,8 +463,55 @@ function createGenericCodeBlock(ownerDocument) {
     fontFamily: '"Fira Code", monospace',
     height: "80px"
   });
+  setComputedStyle(toolbar, {
+    display: "flex",
+    visibility: "visible",
+    opacity: "1",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    height: "32px"
+  });
+  setComputedStyle(runButton, {
+    display: "inline-flex",
+    visibility: "visible",
+    opacity: "1",
+    alignItems: "center",
+    gap: "6px",
+    backgroundColor: "rgb(0, 84, 166)",
+    color: "rgb(255, 255, 255)",
+    boxShadow: "rgba(0, 0, 0, 0.2) 0px 1px 2px",
+    outline: "rgb(0, 84, 166) solid 1px"
+  });
+  setComputedStyle(inlineCode, {
+    display: "inline",
+    visibility: "visible",
+    opacity: "1",
+    backgroundColor: "rgb(245, 245, 245)",
+    color: "rgb(30, 30, 30)",
+    fontFamily: '"Fira Code", monospace',
+    fontSize: "14px",
+    borderRadius: "4px",
+    padding: "2px 5px"
+  });
+  setComputedStyle(keyword, {
+    display: "inline",
+    visibility: "visible",
+    opacity: "1",
+    color: "rgb(127, 0, 170)",
+    fontWeight: "700",
+    textShadow: "rgba(127, 0, 170, 0.2) 0px 0px 1px",
+    tabSize: "4"
+  });
+  setComputedStyle(stringToken, {
+    display: "inline",
+    visibility: "visible",
+    opacity: "1",
+    color: "rgb(163, 21, 21)",
+    fontVariantLigatures: "none"
+  });
 
-  return { wrapper, content };
+  return { wrapper, toolbar, runButton, content, inlineCode, keyword, stringToken };
 }
 
 function createEdAmberCodePair(ownerDocument) {
@@ -460,13 +522,35 @@ function createEdAmberCodePair(ownerDocument) {
   const screenSlot = createElement("div", ownerDocument, { class: "amdiscb-slot" });
   const screenPre = createElement("div", ownerDocument, { class: "amber-el amber-pre" });
   const screenSyntax = createElement("div", ownerDocument, { class: "syntax-highlight" });
+  const screenKeyword = createElement("span", ownerDocument, { class: "token keyword" });
+  const screenClassName = createElement("span", ownerDocument, { class: "token class-name" });
+  const screenLineNumber = createElement("span", ownerDocument, { class: "line-number" });
   const printCard = createElement("div", ownerDocument, { class: "amber-display-codeblock amber-el amber-content ed-print-visible" });
   const printSlot = createElement("div", ownerDocument, { class: "amdiscb-slot" });
   const printPre = createElement("div", ownerDocument, { class: "amber-el amber-pre" });
   const printSyntax = createElement("div", ownerDocument, { class: "syntax-highlight" });
+  const printKeyword = createElement("span", ownerDocument, { class: "token keyword" });
+  const printClassName = createElement("span", ownerDocument, { class: "token class-name" });
+  const printLineNumber = createElement("span", ownerDocument, { class: "line-number" });
 
-  screenSyntax.appendChild(text(sourceText, ownerDocument));
-  printSyntax.appendChild(text(sourceText, ownerDocument));
+  screenLineNumber.appendChild(text("1", ownerDocument));
+  screenKeyword.appendChild(text("class", ownerDocument));
+  screenClassName.appendChild(text("Program", ownerDocument));
+  printLineNumber.appendChild(text("1", ownerDocument));
+  printKeyword.appendChild(text("class", ownerDocument));
+  printClassName.appendChild(text("Program", ownerDocument));
+  screenSyntax.appendChild(screenLineNumber);
+  screenSyntax.appendChild(text(" ", ownerDocument));
+  screenSyntax.appendChild(screenKeyword);
+  screenSyntax.appendChild(text(" ", ownerDocument));
+  screenSyntax.appendChild(screenClassName);
+  screenSyntax.appendChild(text(` {\n${sourceText}`, ownerDocument));
+  printSyntax.appendChild(printLineNumber);
+  printSyntax.appendChild(text(" ", ownerDocument));
+  printSyntax.appendChild(printKeyword);
+  printSyntax.appendChild(text(" ", ownerDocument));
+  printSyntax.appendChild(printClassName);
+  printSyntax.appendChild(text(` {\n${sourceText}`, ownerDocument));
   screenPre.appendChild(screenSyntax);
   printPre.appendChild(printSyntax);
   screenSlot.appendChild(screenPre);
@@ -476,7 +560,7 @@ function createEdAmberCodePair(ownerDocument) {
   root.appendChild(screenCard);
   root.appendChild(printCard);
 
-  [screenCard, screenSlot, screenPre, screenSyntax, printCard, printSlot, printPre, printSyntax].forEach((node) => {
+  [screenCard, screenSlot, screenPre, screenSyntax, screenKeyword, screenClassName, screenLineNumber, printCard, printSlot, printPre, printSyntax, printKeyword, printClassName, printLineNumber].forEach((node) => {
     node.clientHeight = 90;
     node.offsetHeight = 90;
     node.scrollHeight = 260;
@@ -519,6 +603,31 @@ function createEdAmberCodePair(ownerDocument) {
     fontFamily: '"Source Code Pro", monospace',
     height: "90px"
   });
+  setComputedStyle(screenKeyword, {
+    display: "inline",
+    visibility: "visible",
+    opacity: "1",
+    color: "rgb(127, 0, 170)",
+    fontWeight: "700",
+    fontVariantLigatures: "none",
+    tabSize: "4"
+  });
+  setComputedStyle(screenClassName, {
+    display: "inline",
+    visibility: "visible",
+    opacity: "1",
+    color: "rgb(38, 127, 153)",
+    textShadow: "rgba(38, 127, 153, 0.25) 0px 0px 1px"
+  });
+  setComputedStyle(screenLineNumber, {
+    display: "inline-block",
+    visibility: "visible",
+    opacity: "1",
+    color: "rgb(160, 160, 160)",
+    minWidth: "24px",
+    textAlign: "right",
+    marginRight: "12px"
+  });
   setComputedStyle(printCard, {
     display: "none",
     visibility: "visible",
@@ -556,6 +665,31 @@ function createEdAmberCodePair(ownerDocument) {
     fontFamily: '"Source Code Pro", monospace',
     height: "90px"
   });
+  setComputedStyle(printKeyword, {
+    display: "inline",
+    visibility: "visible",
+    opacity: "1",
+    color: "rgb(127, 0, 170)",
+    fontWeight: "700",
+    fontVariantLigatures: "none",
+    tabSize: "4"
+  });
+  setComputedStyle(printClassName, {
+    display: "inline",
+    visibility: "visible",
+    opacity: "1",
+    color: "rgb(38, 127, 153)",
+    textShadow: "rgba(38, 127, 153, 0.25) 0px 0px 1px"
+  });
+  setComputedStyle(printLineNumber, {
+    display: "inline-block",
+    visibility: "visible",
+    opacity: "1",
+    color: "rgb(160, 160, 160)",
+    minWidth: "24px",
+    textAlign: "right",
+    marginRight: "12px"
+  });
 
   return {
     root,
@@ -563,10 +697,16 @@ function createEdAmberCodePair(ownerDocument) {
     screenSlot,
     screenPre,
     screenSyntax,
+    screenKeyword,
+    screenClassName,
+    screenLineNumber,
     printCard,
     printSlot,
     printPre,
-    printSyntax
+    printSyntax,
+    printKeyword,
+    printClassName,
+    printLineNumber
   };
 }
 
@@ -692,6 +832,33 @@ test("copies only the whitelisted computed styles into inline style text", () =>
   assert.doesNotMatch(style, /cursor:pointer;/);
 });
 
+test("prepareClone preserves high fidelity styles inside generic code blocks", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createGenericCodeBlock(ownerDocument);
+  const clone = createGenericCodeBlock(ownerDocument);
+
+  hooks.prepareClone(source.wrapper, clone.wrapper, {
+    inlineStyles: true,
+    stripStyles: false,
+    syncImages: false,
+    enhancedImages: false
+  });
+
+  assert.match(inlineStyleText(clone.keyword), /color:rgb\(127, 0, 170\);/);
+  assert.match(inlineStyleText(clone.keyword), /text-shadow:rgba\(127, 0, 170, 0\.2\) 0px 0px 1px;/);
+  assert.match(inlineStyleText(clone.keyword), /tab-size:4;/);
+  assert.match(inlineStyleText(clone.stringToken), /font-variant-ligatures:none;/);
+  assert.match(inlineStyleText(clone.inlineCode), /background-color:rgb\(245, 245, 245\);/);
+  assert.match(inlineStyleText(clone.inlineCode), /border-radius:4px;/);
+  assert.match(inlineStyleText(clone.toolbar), /display:flex;/);
+  assert.match(inlineStyleText(clone.toolbar), /align-items:center;/);
+  assert.match(inlineStyleText(clone.toolbar), /justify-content:space-between;/);
+  assert.match(inlineStyleText(clone.toolbar), /gap:8px;/);
+  assert.match(inlineStyleText(clone.runButton), /box-shadow:rgba\(0, 0, 0, 0\.2\) 0px 1px 2px;/);
+  assert.match(inlineStyleText(clone.runButton), /outline:rgb\(0, 84, 166\) solid 1px;/);
+});
+
 test("prepareClone applies print preparation in a single traversal context", () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
@@ -709,6 +876,29 @@ test("prepareClone applies print preparation in a single traversal context", () 
   assert.equal(clone.printCard.style.display, "none");
   assert.equal(clone.screenSlot.style.whiteSpace, "pre-wrap");
   assert.equal(clone.screenPre.style.height, "260px");
+});
+
+test("prepareClone preserves Ed Amber token and line number styles", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createEdAmberCodePair(ownerDocument);
+  const clone = createEdAmberCodePair(ownerDocument);
+
+  hooks.prepareClone(source.root, clone.root, {
+    inlineStyles: true,
+    stripStyles: false,
+    syncImages: false,
+    enhancedImages: false
+  });
+
+  assert.match(inlineStyleText(clone.screenKeyword), /color:rgb\(127, 0, 170\);/);
+  assert.match(inlineStyleText(clone.screenKeyword), /font-variant-ligatures:none;/);
+  assert.match(inlineStyleText(clone.screenKeyword), /tab-size:4;/);
+  assert.match(inlineStyleText(clone.screenClassName), /color:rgb\(38, 127, 153\);/);
+  assert.match(inlineStyleText(clone.screenClassName), /text-shadow:rgba\(38, 127, 153, 0\.25\) 0px 0px 1px;/);
+  assert.match(inlineStyleText(clone.screenLineNumber), /display:inline-block;/);
+  assert.match(inlineStyleText(clone.screenLineNumber), /min-width:24px;/);
+  assert.match(inlineStyleText(clone.screenLineNumber), /text-align:right;/);
 });
 
 test("expands generic div code block containers with hidden overflow", async () => {
