@@ -4,6 +4,7 @@
   const STYLE_ID = "__web_exporter_style__";
   const PRINT_CONTAINER_ID = "__web_exporter_print_container__";
   const PRINT_STYLE_ID = "__web_exporter_print_style__";
+  const CONTENT_API_VERSION = 2;
   const IMAGE_LOAD_TIMEOUT_MS = 2000;
   const ENHANCED_IMAGE_LOAD_TIMEOUT_MS = 8000;
   const IFRAME_LOAD_TIMEOUT_MS = 3000;
@@ -207,12 +208,15 @@
   let enhancedImageLoading = false;
   let imagePackaging = false;
   let pdfEngine = "native";
-  let debugMode = false;
   let lastHighlighted = null;
   let overlay = null;
 
   const api = typeof browser !== "undefined" ? browser : chrome;
   const i18n = globalThis.WebExporterI18n;
+  const previousContentApi = globalThis.__WEB_EXPORTER_CONTENT_API__;
+  if (previousContentApi && typeof previousContentApi.dispose === "function") {
+    previousContentApi.dispose();
+  }
 
   function ensureStyleTag() {
     if (document.getElementById(STYLE_ID)) {
@@ -360,16 +364,22 @@
     return mathRoot || element;
   }
 
-  function startSelection(keepStyles, format, enhancedImages, packImages, engine, debug) {
+  function normalizeExportFormat(format) {
+    if (format === "markdown" || format === "png" || format === "debug") {
+      return format;
+    }
+    return "pdf";
+  }
+
+  function startSelection(keepStyles, format, enhancedImages, packImages, engine) {
     if (selecting) {
       return;
     }
     preserveStyles = Boolean(keepStyles);
-    exportFormat = format === "markdown" ? "markdown" : format === "png" ? "png" : "pdf";
+    exportFormat = normalizeExportFormat(format);
     enhancedImageLoading = Boolean(enhancedImages);
     imagePackaging = Boolean(packImages);
     pdfEngine = engine === "cdp" ? "cdp" : engine === "html2canvas" ? "html2canvas" : "native";
-    debugMode = Boolean(debug);
     selecting = true;
     ensureStyleTag();
     createOverlay();
@@ -416,10 +426,9 @@
     event.stopImmediatePropagation();
 
     stopSelection();
-    if (debugMode) {
-      console.info("[web_exporter] selected target", summarizeNodeForDebug(target, createNodeMeasureCache()));
-    }
-    if (exportFormat === "markdown") {
+    if (exportFormat === "debug") {
+      exportDebugPackage(target);
+    } else if (exportFormat === "markdown") {
       exportElementToMarkdown(target);
     } else if (exportFormat === "png") {
       exportElementToPng(target);
@@ -2019,6 +2028,44 @@
     return report;
   }
 
+  function getDebugBrowserInfo() {
+    const manifest = api && api.runtime && typeof api.runtime.getManifest === "function"
+      ? api.runtime.getManifest()
+      : null;
+    return {
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+      language: typeof navigator !== "undefined" ? navigator.language : "",
+      extensionVersion: manifest && manifest.version ? manifest.version : "",
+      manifestVersion: manifest && manifest.manifest_version ? manifest.manifest_version : ""
+    };
+  }
+
+  function getDebugExportConfig() {
+    return {
+      exportFormat,
+      preserveStyles,
+      enhancedImageLoading,
+      imagePackaging,
+      pdfEngine
+    };
+  }
+
+  async function exportDebugPackage(target) {
+    const clone = target.cloneNode(true);
+    prepareClone(target, clone, {
+      inlineStyles: true,
+      stripStyles: false,
+      syncImages: true,
+      enhancedImages: true
+    });
+
+    await prepareMountedPrintRoot(target, clone).catch(() => undefined);
+    emitDebugReport("debug-package", target, clone, {
+      browser: getDebugBrowserInfo(),
+      config: getDebugExportConfig()
+    });
+  }
+
   function downloadMarkdown(content, filename) {
     const blob = new Blob([content || ""], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -2120,21 +2167,6 @@
     if (right <= left || bottom <= top) {
       alert(i18n.t("alert.png_not_visible"));
       return;
-    }
-
-    if (debugMode) {
-      emitDebugReport("png", target, target, {
-        selectionRect: {
-          left,
-          top,
-          right,
-          bottom
-        },
-        viewport: {
-          width: viewportWidth,
-          height: viewportHeight
-        }
-      });
     }
 
     const dataUrl = await captureVisibleTabPng();
@@ -3393,13 +3425,6 @@
     const pageSize = singlePage ? measurePdfPageSize(clone) : getStandardPdfPageSize();
     applyPdfPageWidth(container, pageSize);
     style.textContent = buildInPagePrintStyle(resetRules, pageSize);
-    if (debugMode) {
-      emitDebugReport("pdf-native", target, clone, {
-        pageSize,
-        singlePage,
-        keepStyles
-      });
-    }
     window.print();
   }
 
@@ -3408,13 +3433,6 @@
       await printInPage(target, preserveStyles, enhancedImageLoading, singlePage);
     } catch (error) {
       const payload = buildPrintPayload(target, preserveStyles, enhancedImageLoading, singlePage);
-      if (debugMode) {
-        emitDebugReport("pdf-native", target, payload.clone, {
-          pageSize: payload.pageSize,
-          singlePage: payload.singlePage,
-          preserveStyles
-        });
-      }
       const opened = openPrintWindow(payload, enhancedImageLoading);
       if (!opened) {
         alert(i18n.t("alert.print_blocked"));
@@ -3476,13 +3494,6 @@
     const pageSize = measurePdfPageSize(clone);
     applyPdfPageWidth(container, pageSize);
     style.textContent = buildInPagePrintStyle(resetRules, pageSize);
-
-    if (debugMode) {
-      emitDebugReport("pdf-cdp", target, clone, {
-        pageSize,
-        preserveStyles
-      });
-    }
 
     let response;
     try {
@@ -3558,13 +3569,6 @@
     await prepareMountedPrintRoot(target, clone);
     const pageSize = measurePdfPageSize(clone);
     applyPdfPageWidth(wrapper, pageSize);
-
-    if (debugMode) {
-      emitDebugReport("pdf-html2canvas", target, clone, {
-        pageSize,
-        preserveStyles
-      });
-    }
 
     try {
       const eventId = `__web_exporter_pdf_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
@@ -3732,38 +3736,68 @@
       resolveMarkdownPackagingAssets,
       resolveSelectableTarget,
       serializeNodeForDebug,
-      summarizeNodeForDebug
+      summarizeNodeForDebug,
+      exportDebugPackage,
+      normalizeExportFormat
     };
   }
 
-  if (api && api.runtime && api.runtime.onMessage) {
-    api.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (!message || !message.type) {
-        if (typeof sendResponse === "function") {
-          sendResponse({ ok: false, error: "Missing message type" });
-        }
-        return;
-      }
+  function startSelectionFromPopup(payload = {}) {
+    startSelection(
+      payload.preserveStyles,
+      payload.exportFormat,
+      payload.enhancedImageLoading,
+      payload.imagePackaging,
+      payload.pdfEngine
+    );
+    return {
+      ok: true,
+      version: CONTENT_API_VERSION,
+      exportFormat
+    };
+  }
 
-      if (message.type === "START_SELECTION") {
-        startSelection(message.preserveStyles, message.exportFormat, message.enhancedImageLoading, message.imagePackaging, message.pdfEngine, message.debugMode);
-        if (typeof sendResponse === "function") {
-          sendResponse({ ok: true });
-        }
-        return;
-      }
-
-      if (message.type === "CANCEL_SELECTION") {
-        stopSelection();
-        if (typeof sendResponse === "function") {
-          sendResponse({ ok: true });
-        }
-        return;
-      }
-
+  const runtimeMessageListener = (message, sender, sendResponse) => {
+    if (!message || !message.type) {
       if (typeof sendResponse === "function") {
-        sendResponse({ ok: false, error: "Unknown message type" });
+        sendResponse({ ok: false, error: "Missing message type" });
       }
-    });
+      return;
+    }
+
+    if (message.type === "START_SELECTION") {
+      const response = startSelectionFromPopup(message);
+      if (typeof sendResponse === "function") {
+        sendResponse(response);
+      }
+      return;
+    }
+
+    if (message.type === "CANCEL_SELECTION") {
+      stopSelection();
+      if (typeof sendResponse === "function") {
+        sendResponse({ ok: true });
+      }
+      return;
+    }
+
+    if (typeof sendResponse === "function") {
+      sendResponse({ ok: false, error: "Unknown message type" });
+    }
+  };
+
+  globalThis.__WEB_EXPORTER_CONTENT_API__ = {
+    version: CONTENT_API_VERSION,
+    startSelectionFromPopup,
+    dispose() {
+      stopSelection();
+      if (api && api.runtime && api.runtime.onMessage && typeof api.runtime.onMessage.removeListener === "function") {
+        api.runtime.onMessage.removeListener(runtimeMessageListener);
+      }
+    }
+  };
+
+  if (api && api.runtime && api.runtime.onMessage) {
+    api.runtime.onMessage.addListener(runtimeMessageListener);
   }
 })();

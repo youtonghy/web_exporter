@@ -951,6 +951,38 @@ test("builds a debug report with node summary and HTML snippets", () => {
   assert.equal(report.pageSize.widthPx, 800);
 });
 
+test("supports debug as a standalone export format", () => {
+  const hooks = loadContentHooks();
+
+  assert.equal(hooks.normalizeExportFormat("debug"), "debug");
+  assert.equal(hooks.normalizeExportFormat("markdown"), "markdown");
+  assert.equal(hooks.normalizeExportFormat("png"), "png");
+  assert.equal(hooks.normalizeExportFormat("bad"), "pdf");
+});
+
+test("debug package report includes original and prepared HTML", () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const source = createElement("section", ownerDocument, { class: "answer-block" });
+  const sourceCode = createElement("pre", ownerDocument);
+  sourceCode.appendChild(text("print('source')", ownerDocument));
+  source.appendChild(sourceCode);
+
+  const prepared = createElement("section", ownerDocument, { class: "answer-block" });
+  const preparedCode = createElement("pre", ownerDocument);
+  preparedCode.appendChild(text("print('prepared')", ownerDocument));
+  prepared.appendChild(preparedCode);
+
+  const report = hooks.buildDebugReport("debug-package", source, prepared, {
+    config: { exportFormat: "debug" }
+  });
+
+  assert.equal(report.kind, "debug-package");
+  assert.equal(report.config.exportFormat, "debug");
+  assert.match(report.targetHtml, /print\(&#39;source&#39;\)/);
+  assert.match(report.preparedHtml, /print\(&#39;prepared&#39;\)/);
+});
+
 test("expands generic div code block containers with hidden overflow", async () => {
   const hooks = loadContentHooks();
   const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };

@@ -72,10 +72,6 @@ button:hover {
   line-height: 1.4;
 }
 
-.hint + .hint {
-  margin-top: -4px;
-}
-
 .status {
   margin: 0;
   font-size: 12px;

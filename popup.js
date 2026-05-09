@@ -13,7 +13,6 @@ const enhancedToggle = document.getElementById("enhancedImageLoading");
 const enhancedRow = document.getElementById("enhancedImageLoadingRow");
 const imagePackagingToggle = document.getElementById("imagePackaging");
 const imagePackagingRow = document.getElementById("imagePackagingRow");
-const debugModeToggle = document.getElementById("debugMode");
 const selectButton = document.getElementById("selectAndExport");
 let lastPreserveValue = preserveToggle.checked;
 let lastEnhancedValue = enhancedToggle.checked;
@@ -66,26 +65,13 @@ function queryActiveTab() {
   });
 }
 
-function sendMessage(tabId, message) {
-  return new Promise((resolve, reject) => {
-    api.tabs.sendMessage(tabId, message, (response) => {
-      const err = api.runtime && api.runtime.lastError;
-      if (err) {
-        reject(err);
-        return;
-      }
-      resolve(response);
-    });
-  });
-}
-
 function injectContentScript(tabId) {
   if (api.scripting && api.scripting.executeScript) {
     return new Promise((resolve, reject) => {
       api.scripting.executeScript(
         {
           target: { tabId },
-          files: ["content.js"]
+          files: ["src/i18n/index.js", "content.js"]
         },
         () => {
           const err = api.runtime && api.runtime.lastError;
@@ -100,8 +86,8 @@ function injectContentScript(tabId) {
   }
 
   if (api.tabs && api.tabs.executeScript) {
-    return new Promise((resolve, reject) => {
-      api.tabs.executeScript(tabId, { file: "content.js" }, () => {
+    const executeFile = (file) => new Promise((resolve, reject) => {
+      api.tabs.executeScript(tabId, { file }, () => {
         const err = api.runtime && api.runtime.lastError;
         if (err) {
           reject(err);
@@ -110,9 +96,84 @@ function injectContentScript(tabId) {
         resolve();
       });
     });
+    return executeFile("src/i18n/index.js").then(() => executeFile("content.js"));
   }
 
   return Promise.reject(new Error(t("error.scripting_unavailable")));
+}
+
+function normalizeScriptResult(result) {
+  if (Array.isArray(result) && result.length) {
+    const first = result[0];
+    return first && Object.prototype.hasOwnProperty.call(first, "result") ? first.result : first;
+  }
+  return result;
+}
+
+function callContentApi(tabId, payload) {
+  const invoke = (data) => {
+    const contentApi = globalThis.__WEB_EXPORTER_CONTENT_API__;
+    if (!contentApi || contentApi.version < 2 || typeof contentApi.startSelectionFromPopup !== "function") {
+      return { ok: false, error: "Content API unavailable" };
+    }
+    return contentApi.startSelectionFromPopup(data);
+  };
+
+  if (api.scripting && api.scripting.executeScript) {
+    return new Promise((resolve, reject) => {
+      api.scripting.executeScript(
+        {
+          target: { tabId },
+          func: invoke,
+          args: [payload]
+        },
+        (result) => {
+          const err = api.runtime && api.runtime.lastError;
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve(normalizeScriptResult(result));
+        }
+      );
+    });
+  }
+
+  if (api.tabs && api.tabs.executeScript) {
+    const code = `(${invoke.toString()})(${JSON.stringify(payload)});`;
+    return new Promise((resolve, reject) => {
+      api.tabs.executeScript(tabId, { code }, (result) => {
+        const err = api.runtime && api.runtime.lastError;
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(normalizeScriptResult(result));
+      });
+    });
+  }
+
+  return Promise.reject(new Error(t("error.scripting_unavailable")));
+}
+
+async function startSelectionInTab(tabId, payload) {
+  let response = null;
+  try {
+    response = await callContentApi(tabId, payload);
+  } catch (error) {
+    response = null;
+  }
+
+  if (response && response.ok) {
+    return response;
+  }
+
+  await injectContentScript(tabId);
+  response = await callContentApi(tabId, payload);
+  if (!response || !response.ok) {
+    throw new Error((response && response.error) || t("status.injection_error"));
+  }
+  return response;
 }
 
 function updatePdfEngineUI() {
@@ -163,7 +224,8 @@ function updatePdfEngineUI() {
 function updateFormatUI() {
   const isMarkdown = formatSelect.value === "markdown";
   const isPng = formatSelect.value === "png";
-  const isPdf = !isMarkdown && !isPng;
+  const isDebug = formatSelect.value === "debug";
+  const isPdf = !isMarkdown && !isPng && !isDebug;
 
   if (isPdf) {
     preserveRow.style.display = "";
@@ -222,16 +284,10 @@ selectButton.addEventListener("click", async () => {
       exportFormat: formatSelect.value,
       enhancedImageLoading: enhancedToggle.checked,
       imagePackaging: imagePackagingToggle.checked,
-      pdfEngine: formatSelect.value === "pdf" ? pdfEngineSelect.value : undefined,
-      debugMode: debugModeToggle.checked
+      pdfEngine: formatSelect.value === "pdf" ? pdfEngineSelect.value : undefined
     };
 
-    try {
-      await sendMessage(tab.id, payload);
-    } catch (error) {
-      await injectContentScript(tab.id);
-      await sendMessage(tab.id, payload);
-    }
+    await startSelectionInTab(tab.id, payload);
 
     window.close();
   } catch (error) {
