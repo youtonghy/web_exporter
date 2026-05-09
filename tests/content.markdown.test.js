@@ -418,7 +418,7 @@ function createEdStemAmberBlock() {
     el("span", { class: "syntax-type" }, [text("long")]),
     text(" data_input[], \n    "),
     el("span", { class: "syntax-type" }, [text("int")]),
-    text(" num_add\n);")
+    text(" num_add,\n    A[] allowed_ips,\n    <IP> source_ip\n);")
   ]);
   const printCode = el("div", { class: "amber-display-codeblock ed-print-visible" }, [
     el("div", { class: "amdiscb-slot" }, [
@@ -475,6 +475,16 @@ function createEdStemMonacoOnlyBlock() {
     el("div", { class: "snippet" }, [editor])
   ]);
   return { block, editor, viewLines };
+}
+
+function createEdStemInlineCodeBlock() {
+  return el("p", { class: "amber-el amber-paragraph amber-content" }, [
+    text("Use "),
+    el("code", {}, [text("data_input A[] <IP>")]),
+    text(" literally, but keep "),
+    text("data_input A[] <IP>"),
+    text(" escaped as prose.")
+  ]);
 }
 
 function createSimpleTable() {
@@ -731,7 +741,7 @@ test("exports EdStem Amber callouts as blockquotes and code blocks once", () => 
   assert.equal(hooks.resolveSelectableTarget(block.syntax), block.printCode);
   assert.equal(
     hooks.elementToMarkdown(block.root),
-    "> To be completed in \"Task 2: Skeleton\" via Ed\n\nYou must complete the function\n\n```cpp\nvoid count_min_sketch(\n    long data_input[],\n    int num_add\n);\n```"
+    "> To be completed in \"Task 2: Skeleton\" via Ed\n\nYou must complete the function\n\n```cpp\nvoid count_min_sketch(\n    long data_input[],\n    int num_add,\n    A[] allowed_ips,\n    <IP> source_ip\n);\n```"
   );
 });
 
@@ -743,7 +753,17 @@ test("does not apply EdStem Amber markdown rules outside edstem.org", () => {
   assert.notEqual(hooks.resolveSelectableTarget(block.syntax), block.printCode);
   assert.equal(
     hooks.elementToMarkdown(block.root),
-    "To be completed in \"Task 2: Skeleton\" via Ed\n\nYou must complete the function\n\nvoid\n\ncount\\_min\\_sketch\n\n(\n\nlong\n\ndata\\_input\\[\\],\n\nint\n\nnum\\_add );\n\nExpand (4 lines)\n\nRun\n\nC\n\nvoid duplicate"
+    "To be completed in \"Task 2: Skeleton\" via Ed\n\nYou must complete the function\n\nvoid\n\ncount\\_min\\_sketch\n\n(\n\nlong\n\ndata\\_input\\[\\],\n\nint\n\nnum\\_add, A\\[\\] allowed\\_ips, &lt;IP&gt; source\\_ip );\n\nExpand (4 lines)\n\nRun\n\nC\n\nvoid duplicate"
+  );
+});
+
+test("keeps EdStem inline code literal without changing prose escaping", () => {
+  const hooks = loadContentHooks({ hostname: "edstem.org" });
+  const block = createEdStemInlineCodeBlock();
+
+  assert.equal(
+    hooks.elementToMarkdown(block),
+    "Use `data_input A[] <IP>` literally, but keep data\\_input A\\[\\] &lt;IP&gt; escaped as prose."
   );
 });
 

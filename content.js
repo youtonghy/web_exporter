@@ -734,6 +734,18 @@
       .replace(/>/g, "&gt;");
   }
 
+  function formatInlineCodeSpan(text) {
+    const content = String(text || "").replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ");
+    if (!content) {
+      return "";
+    }
+    const runs = content.match(/`+/g) || [];
+    const delimiter = "`".repeat(Math.max(1, ...runs.map((run) => run.length + 1)));
+    const needsPadding = content.startsWith("`") || content.endsWith("`");
+    const body = needsPadding ? ` ${content} ` : content;
+    return `${delimiter}${body}${delimiter}`;
+  }
+
   function escapeHtmlAttribute(text) {
     return String(text || "")
       .replace(/&/g, "&amp;")
@@ -1676,7 +1688,7 @@
     }
     if (tag === "code") {
       const content = node.textContent || "";
-      return content ? `\`${escapeMarkdownText(content)}\`` : "";
+      return isEdStemMarkdownMode() ? formatInlineCodeSpan(content) : (content ? `\`${escapeMarkdownText(content)}\`` : "");
     }
     if (tag === "sup" || tag === "sub" || tag === "kbd") {
       const content = convertInlineChildren(node, context);
