@@ -734,6 +734,46 @@
       .replace(/>/g, "&gt;");
   }
 
+  function escapeHtmlAttribute(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function escapeHtmlText(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function getSerializableAttributes(node) {
+    if (!node || !node.attributes) {
+      return [];
+    }
+    if (typeof node.attributes.length === "number") {
+      return Array.from(node.attributes).map((attr) => [attr.name, attr.value]);
+    }
+    return Object.keys(node.attributes).map((name) => [name, node.attributes[name]]);
+  }
+
+  function serializeHtmlNode(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeHtmlText(node.nodeValue || "");
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+    const tag = node.tagName.toLowerCase();
+    const attrs = getSerializableAttributes(node)
+      .map(([name, value]) => ` ${name}="${escapeHtmlAttribute(value)}"`)
+      .join("");
+    const content = Array.from(node.childNodes).map((child) => serializeHtmlNode(child)).join("");
+    return `<${tag}${attrs}>${content}</${tag}>`;
+  }
+
   function normalizeMarkdown(text) {
     return text
       .replace(/\r\n/g, "\n")
@@ -801,13 +841,71 @@
     return node instanceof Element && node.classList && node.classList.contains(name);
   }
 
+  function getCurrentHostname() {
+    const candidates = [
+      typeof location !== "undefined" ? location : null,
+      typeof window !== "undefined" ? window.location : null,
+      typeof document !== "undefined" ? document.location : null
+    ];
+    for (const candidate of candidates) {
+      if (candidate && typeof candidate.hostname === "string") {
+        return candidate.hostname.toLowerCase();
+      }
+    }
+    return "";
+  }
+
+  function isEdStemHostname(hostname) {
+    const normalized = (hostname || "").toLowerCase();
+    return normalized === "edstem.org" || normalized.endsWith(".edstem.org");
+  }
+
+  function isEdStemMarkdownMode() {
+    return isEdStemHostname(getCurrentHostname());
+  }
+
+  function hasAnyClassName(node, names) {
+    return node instanceof Element && names.some((name) => hasClass(node, name));
+  }
+
+  function isEdStemElement(node, names) {
+    return isEdStemMarkdownMode() && hasAnyClassName(node, names);
+  }
+
   function isCodeBlockRoot(node) {
     return node instanceof Element && getCodeBlockRoot(node) === node;
+  }
+
+  function getEdStemCodeBlockRoot(node) {
+    if (!isEdStemMarkdownMode() || !(node instanceof Element)) {
+      return null;
+    }
+
+    const selectors = [
+      ".amber-display-codeblock",
+      ".syntax-highlight",
+      ".monaco-editor",
+      ".view-lines",
+      ".snippet",
+      ".amber-pre"
+    ];
+    for (const selector of selectors) {
+      const match = node.closest(selector);
+      if (match) {
+        return match;
+      }
+    }
+    return null;
   }
 
   function getCodeBlockRoot(node) {
     if (!(node instanceof Element)) {
       return null;
+    }
+
+    const edStemRoot = getEdStemCodeBlockRoot(node);
+    if (edStemRoot) {
+      return edStemRoot;
     }
 
     const pre = node.closest("pre");
@@ -865,6 +963,47 @@
     return node;
   }
 
+  function findFirstDescendant(node, selector) {
+    if (!(node instanceof Element) || typeof node.querySelector !== "function") {
+      return null;
+    }
+    const match = node.querySelector(selector);
+    return match instanceof Element ? match : null;
+  }
+
+  function getEdStemCodeContentRoot(node) {
+    if (!isEdStemMarkdownMode() || !(node instanceof Element)) {
+      return null;
+    }
+
+    const printVisible = Array.from(node.querySelectorAll ? node.querySelectorAll(".ed-print-visible") : [])
+      .map((visible) => findFirstDescendant(visible, ".syntax-highlight"))
+      .find(Boolean);
+    if (printVisible) {
+      return printVisible;
+    }
+
+    if (hasClass(node, "syntax-highlight")) {
+      return node;
+    }
+
+    const syntax = findFirstDescendant(node, ".syntax-highlight");
+    if (syntax) {
+      return syntax;
+    }
+
+    if (hasClass(node, "view-lines")) {
+      return node;
+    }
+
+    const viewLines = findFirstDescendant(node, ".view-lines");
+    if (viewLines) {
+      return viewLines;
+    }
+
+    return null;
+  }
+
   function isCodeTextLineContainer(node) {
     if (!(node instanceof Element)) {
       return false;
@@ -902,6 +1041,25 @@
     }
 
     return content;
+  }
+
+  function extractEdStemMonacoLineText(line) {
+    return Array.from(line.childNodes)
+      .map((child) => extractCodeText(child))
+      .join("")
+      .replace(/\u00a0/g, " ");
+  }
+
+  function extractEdStemCodeText(contentRoot) {
+    if (!(contentRoot instanceof Element)) {
+      return "";
+    }
+    if (hasClass(contentRoot, "view-lines")) {
+      return Array.from(contentRoot.querySelectorAll ? contentRoot.querySelectorAll(".view-line") : [])
+        .map((line) => extractEdStemMonacoLineText(line))
+        .join("\n");
+    }
+    return extractCodeText(contentRoot, true);
   }
 
   function normalizeCodeBlockContent(text) {
@@ -994,7 +1152,7 @@
       return "";
     }
 
-    const directAttributes = ["data-language", "data-lang"];
+    const directAttributes = ["data-language", "data-lang", ...(isEdStemMarkdownMode() ? ["data-mode-id"] : [])];
     for (const current of [node, contentRoot]) {
       if (!(current instanceof Element)) {
         continue;
@@ -1011,7 +1169,7 @@
       }
     }
 
-    const labeledNode = node.querySelector("[data-language], [data-lang], [class]");
+    const labeledNode = node.querySelector(isEdStemMarkdownMode() ? "[data-language], [data-lang], [data-mode-id]" : "[data-language], [data-lang]");
     if (labeledNode instanceof Element) {
       for (const name of directAttributes) {
         const value = normalizeCodeLanguage(labeledNode.getAttribute(name) || "");
@@ -1020,6 +1178,14 @@
         }
       }
       const classValue = normalizeCodeLanguage(getLanguageFromClassName(labeledNode));
+      if (classValue) {
+        return classValue;
+      }
+    }
+
+    const labeledClassNode = node.querySelector("[class]");
+    if (labeledClassNode instanceof Element) {
+      const classValue = normalizeCodeLanguage(getLanguageFromClassName(labeledClassNode));
       if (classValue) {
         return classValue;
       }
@@ -1034,8 +1200,9 @@
     if (!codeRoot || codeRoot !== node) {
       return "";
     }
-    const contentRoot = getCodeContentRoot(codeRoot);
-    const content = normalizeCodeBlockContent(extractCodeText(contentRoot, true));
+    const contentRoot = getEdStemCodeContentRoot(codeRoot) || getCodeContentRoot(codeRoot);
+    const rawContent = isEdStemMarkdownMode() ? extractEdStemCodeText(contentRoot) : extractCodeText(contentRoot, true);
+    const content = normalizeCodeBlockContent(rawContent);
     if (!content) {
       return "";
     }
@@ -1511,6 +1678,10 @@
       const content = node.textContent || "";
       return content ? `\`${escapeMarkdownText(content)}\`` : "";
     }
+    if (tag === "sup" || tag === "sub" || tag === "kbd") {
+      const content = convertInlineChildren(node, context);
+      return `<${tag}>${content}</${tag}>`;
+    }
     if (tag === "a") {
       const href = node.getAttribute("href");
       const text = convertInlineChildren(node, context).trim() || escapeMarkdownText(node.textContent || "");
@@ -1612,7 +1783,7 @@
       }
     }
 
-    return blocks.join("\n");
+    return blocks.join("\n\n");
   }
 
   function convertList(node, context) {
@@ -1642,12 +1813,123 @@
     return lines.join("\n");
   }
 
+  function getElementChildrenByTag(node, tags) {
+    return Array.from(node.childNodes).filter((child) => {
+      if (!(child instanceof Element)) {
+        return false;
+      }
+      return tags.has(child.tagName.toLowerCase());
+    });
+  }
+
+  function convertTableCell(node, context) {
+    return convertInlineChildren(node, context)
+      .replace(/\|/g, "\\|")
+      .trim();
+  }
+
+  function isComplexTable(node) {
+    const cells = node.querySelectorAll ? node.querySelectorAll("td, th") : [];
+    return Array.from(cells).some((cell) => cell.getAttribute("rowspan") || cell.getAttribute("colspan"));
+  }
+
+  function formatTableAlignment(cell) {
+    const align = (cell.getAttribute("align") || "").toLowerCase();
+    if (align === "left") {
+      return ":---";
+    }
+    if (align === "right") {
+      return "---:";
+    }
+    if (align === "center") {
+      return ":---:";
+    }
+    return "---";
+  }
+
+  function formatMarkdownTableRow(cells) {
+    return `| ${cells.join(" | ")} |`;
+  }
+
+  function convertTable(node, context) {
+    if (isComplexTable(node)) {
+      return serializeHtmlNode(node);
+    }
+
+    const rows = getElementChildrenByTag(node, new Set(["thead", "tbody", "tfoot"]))
+      .flatMap((section) => getElementChildrenByTag(section, new Set(["tr"])))
+      .concat(getElementChildrenByTag(node, new Set(["tr"])));
+    if (!rows.length) {
+      return "";
+    }
+
+    const headerCells = getElementChildrenByTag(rows[0], new Set(["th", "td"]));
+    if (!headerCells.length) {
+      return "";
+    }
+    const header = headerCells.map((cell) => convertTableCell(cell, context));
+    const separator = headerCells.map((cell) => formatTableAlignment(cell));
+    const bodyRows = rows.slice(1).map((row) => {
+      const cells = getElementChildrenByTag(row, new Set(["th", "td"]));
+      return formatMarkdownTableRow(cells.map((cell) => convertTableCell(cell, context)));
+    });
+    return [formatMarkdownTableRow(header), formatMarkdownTableRow(separator), ...bodyRows].join("\n");
+  }
+
+  function convertDefinitionList(node, context) {
+    const lines = [];
+    node.childNodes.forEach((child) => {
+      if (!(child instanceof Element)) {
+        return;
+      }
+      const tag = child.tagName.toLowerCase();
+      if (tag === "dt") {
+        const term = convertInlineChildren(child, context).trim();
+        if (term) {
+          lines.push(term);
+        }
+        return;
+      }
+      if (tag === "dd") {
+        const definition = convertInlineChildren(child, context).trim();
+        if (definition) {
+          lines.push(`: ${definition}`);
+        }
+      }
+    });
+    return lines.join("\n");
+  }
+
+  function convertDetails(node, context) {
+    const blocks = [];
+    node.childNodes.forEach((child) => {
+      if (!(child instanceof Element)) {
+        return;
+      }
+      if (child.tagName.toLowerCase() === "summary") {
+        const summary = convertInlineChildren(child, context).trim();
+        if (summary) {
+          blocks.push(`**${summary}**`);
+        }
+        return;
+      }
+      const block = convertNode(child, context);
+      if (block && block.trim()) {
+        blocks.push(block.trim());
+      }
+    });
+    return blocks.join("\n\n");
+  }
+
   function convertNode(node, context) {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = normalizeWhitespace(node.nodeValue || "");
       return escapeMarkdownText(text);
     }
     if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+    if (isEdStemElement(node, ["ed-print-hidden"])) {
       return "";
     }
     const codeBlock = formatCodeBlock(node);
@@ -1670,7 +1952,11 @@
       return content ? `${"#".repeat(level)} ${content}` : "";
     }
     if (tag === "p") {
-      return convertInlineChildren(node, context).trim();
+      const content = convertInlineChildren(node, context).trim();
+      if (isEdStemElement(node, ["amber-callout", "amber-callout-info"])) {
+        return formatBlockquoteMarkdown(content);
+      }
+      return content;
     }
     if (tag === "pre") {
       const content = node.textContent || "";
@@ -1681,13 +1967,19 @@
       if (!content) {
         return "";
       }
-      return content
-        .split("\n")
-        .map((line) => (line ? `> ${line}` : ">"))
-        .join("\n");
+      return formatBlockquoteMarkdown(content);
     }
     if (tag === "ul" || tag === "ol") {
       return convertList(node, context);
+    }
+    if (tag === "table") {
+      return convertTable(node, context);
+    }
+    if (tag === "dl") {
+      return convertDefinitionList(node, context);
+    }
+    if (tag === "details") {
+      return convertDetails(node, context);
     }
     if (tag === "hr") {
       return "---";
@@ -1710,6 +2002,16 @@
   function elementToMarkdown(root) {
     const content = convertNode(root, { listDepth: 0 });
     return normalizeMarkdown(content);
+  }
+
+  function formatBlockquoteMarkdown(content) {
+    if (!content) {
+      return "";
+    }
+    return content
+      .split("\n")
+      .map((line) => (line ? `> ${line}` : ">"))
+      .join("\n");
   }
 
   function collectMarkdownExport(root, options) {
@@ -3719,6 +4021,8 @@
       getCodeContentRoot,
       getCachedComputedStyle,
       getDocumentContentHeight,
+      getEdStemCodeBlockRoot,
+      getEdStemCodeContentRoot,
       getGenericCodeBlockRoot,
       getMathRoot,
       getNodeMeasuredHeight,
@@ -3738,6 +4042,8 @@
       serializeNodeForDebug,
       summarizeNodeForDebug,
       exportDebugPackage,
+      isEdStemHostname,
+      isEdStemMarkdownMode,
       normalizeExportFormat
     };
   }

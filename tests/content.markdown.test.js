@@ -174,8 +174,10 @@ function el(tagName, attrs, children = []) {
   return new MockElement(tagName, attrs, children);
 }
 
-function loadContentHooks() {
+function loadContentHooks(options = {}) {
   const source = fs.readFileSync(path.join(__dirname, "..", "content.js"), "utf8");
+  const hostname = options.hostname || "example.com";
+  const location = { hostname };
   const context = {
     console,
     setTimeout,
@@ -191,8 +193,10 @@ function loadContentHooks() {
     HTMLScriptElement: MockHTMLScriptElement,
     HTMLImageElement: MockHTMLImageElement,
     HTMLTextAreaElement: MockHTMLTextAreaElement,
+    location,
     document: {
       title: "fixture",
+      location,
       body: new MockElement("body"),
       head: new MockElement("head"),
       documentElement: new MockElement("html"),
@@ -206,6 +210,7 @@ function loadContentHooks() {
       }
     },
     window: {
+      location,
       addEventListener() {},
       removeEventListener() {},
       print() {},
@@ -399,6 +404,77 @@ function createCodeMirrorBlock() {
     el("div", { class: "viewer-shell" }, [editor])
   ]);
   return { root, editor, codeLeaf };
+}
+
+function createEdStemAmberBlock() {
+  const callout = el("p", { class: "amber-el amber-callout amber-content amber-callout-info" }, [
+    text('To be completed in "Task 2: Skeleton" via Ed')
+  ]);
+  const syntax = el("div", { class: "syntax-highlight", "data-language": "cpp" }, [
+    el("span", { class: "syntax-type" }, [text("void")]),
+    text(" "),
+    el("span", { class: "syntax-title" }, [text("count_min_sketch")]),
+    text("(\n    "),
+    el("span", { class: "syntax-type" }, [text("long")]),
+    text(" data_input[], \n    "),
+    el("span", { class: "syntax-type" }, [text("int")]),
+    text(" num_add\n);")
+  ]);
+  const printCode = el("div", { class: "amber-display-codeblock ed-print-visible" }, [
+    el("div", { class: "amdiscb-slot" }, [
+      el("div", { class: "amber-el amber-pre" }, [syntax])
+    ]),
+    el("button", {}, [text("Expand (4 lines)")])
+  ]);
+  const viewLines = el("div", { class: "view-lines" }, [
+    el("div", { class: "view-line" }, [
+      el("span", {}, [
+        el("span", { class: "mtk23" }, [text("void")]),
+        el("span", { class: "mtk1" }, [text("\u00a0duplicate")])
+      ])
+    ])
+  ]);
+  const hiddenSnippet = el("div", { class: "snippet ed-print-hidden" }, [
+    el("button", {}, [text("Run")]),
+    el("div", { class: "snip-tb-lang-static" }, [text("C")]),
+    el("div", { class: "monaco-editor", "data-mode-id": "c" }, [viewLines])
+  ]);
+  const root = el("div", { class: "lessli-doc" }, [
+    callout,
+    el("p", { class: "amber-el amber-paragraph amber-content" }, [text("You must complete the function")]),
+    el("div", { class: "amber-display-block" }, [printCode, hiddenSnippet])
+  ]);
+  return { root, callout, syntax, printCode, hiddenSnippet, viewLines };
+}
+
+function createEdStemMonacoOnlyBlock() {
+  const viewLines = el("div", { class: "view-lines" }, [
+    el("div", { class: "view-line" }, [
+      el("span", {}, [
+        el("span", { class: "mtk23" }, [text("void")]),
+        el("span", { class: "mtk1" }, [text("\u00a0count_min_sketch")]),
+        el("span", { class: "mtk16" }, [text("(")])
+      ])
+    ]),
+    el("div", { class: "view-line" }, [
+      el("span", {}, [
+        el("span", { class: "mtk1" }, [text("\u00a0\u00a0\u00a0\u00a0")]),
+        el("span", { class: "mtk23" }, [text("long")]),
+        el("span", { class: "mtk1" }, [text("\u00a0data_input")]),
+        el("span", { class: "mtk16" }, [text("[]")])
+      ])
+    ]),
+    el("div", { class: "view-line" }, [
+      el("span", {}, [
+        el("span", { class: "mtk16" }, [text(");")])
+      ])
+    ])
+  ]);
+  const editor = el("div", { class: "monaco-editor", "data-mode-id": "c" }, [viewLines]);
+  const block = el("div", { class: "amber-display-codeblock" }, [
+    el("div", { class: "snippet" }, [editor])
+  ]);
+  return { block, editor, viewLines };
 }
 
 function createSimpleTable() {
@@ -644,6 +720,40 @@ test("exports CodeMirror code blocks as fenced code with detected language", () 
   assert.equal(
     hooks.elementToMarkdown(hooks.resolveSelectableTarget(block.codeLeaf)),
     "```python\nfor i in range(n):\n    for j in range(n):\n        print(i, j)\n```"
+  );
+});
+
+test("exports EdStem Amber callouts as blockquotes and code blocks once", () => {
+  const hooks = loadContentHooks({ hostname: "au.edstem.org" });
+  const block = createEdStemAmberBlock();
+
+  assert.equal(hooks.isEdStemMarkdownMode(), true);
+  assert.equal(hooks.resolveSelectableTarget(block.syntax), block.printCode);
+  assert.equal(
+    hooks.elementToMarkdown(block.root),
+    "> To be completed in \"Task 2: Skeleton\" via Ed\n\nYou must complete the function\n\n```cpp\nvoid count_min_sketch(\n    long data_input[],\n    int num_add\n);\n```"
+  );
+});
+
+test("does not apply EdStem Amber markdown rules outside edstem.org", () => {
+  const hooks = loadContentHooks({ hostname: "example.com" });
+  const block = createEdStemAmberBlock();
+
+  assert.equal(hooks.isEdStemMarkdownMode(), false);
+  assert.notEqual(hooks.resolveSelectableTarget(block.syntax), block.printCode);
+  assert.equal(
+    hooks.elementToMarkdown(block.root),
+    "To be completed in \"Task 2: Skeleton\" via Ed\n\nYou must complete the function\n\nvoid\n\ncount\\_min\\_sketch\n\n(\n\nlong\n\ndata\\_input\\[\\],\n\nint\n\nnum\\_add );\n\nExpand (4 lines)\n\nRun\n\nC\n\nvoid duplicate"
+  );
+});
+
+test("falls back to EdStem Monaco view lines while preserving spaces", () => {
+  const hooks = loadContentHooks({ hostname: "edstem.org" });
+  const block = createEdStemMonacoOnlyBlock();
+
+  assert.equal(
+    hooks.elementToMarkdown(block.block),
+    "```c\nvoid count_min_sketch(\n    long data_input[]\n);\n```"
   );
 });
 
