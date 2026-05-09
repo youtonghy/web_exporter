@@ -16,6 +16,15 @@ test("popup exposes debug package as a standalone export format", () => {
   assert.match(script, /const isPdf = !isMarkdown && !isPng && !isDebug;/);
 });
 
+test("popup defaults export format to markdown", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "popup.html"), "utf8");
+  const selectMatch = html.match(/<select id="exportFormat">([\s\S]*?)<\/select>/);
+
+  assert.ok(selectMatch);
+  assert.match(selectMatch[1].trim(), /^<option value="markdown" selected data-i18n="option\.markdown">/);
+  assert.doesNotMatch(selectMatch[1], /<option value="pdf" selected/);
+});
+
 test("popup starts selection through the content API instead of the legacy listener", () => {
   const script = fs.readFileSync(path.join(__dirname, "..", "popup.js"), "utf8");
 
