@@ -4,7 +4,7 @@
 
 ## 如何使用
 
-我已经打包了适用于Chrome浏览器的CRX，并发表在release中可以直接下载并使用。如果你的Chrome浏览器不支持的话，可以请先开启开发者模式。
+GitHub Release 中提供 Chrome 与 Firefox 的未签名开发者模式产物。Chrome 推荐下载 zip 解压后通过开发者模式加载；Release 中也会附带 CRX 产物。如果浏览器不允许直接安装 CRX，请改用 zip 解压加载。
 
 ## 关于上架商店
 
@@ -12,7 +12,7 @@
 
 https://addons.mozilla.org/zh-CN/firefox/addon/web-exporter/
 
-Chrome 商店的话，因为注册成为开发者需要付5美元。虽然这个价格不贵，但是我不太想付，因为这个插件本身就是免费的，我也不赚钱，那我还要给谷歌花钱去，我觉得这样很不合理，所以你们可以直接在 release 里面下载 CRX 文件自己加载到自己的浏览器中就好了。
+Chrome 商店的话，因为注册成为开发者需要付5美元。虽然这个价格不贵，但是我不太想付，因为这个插件本身就是免费的，我也不赚钱，那我还要给谷歌花钱去，我觉得这样很不合理，所以你们可以直接在 release 里面下载开发者模式产物自己加载到浏览器中就好了。
 
 ## Chrome (MV3) 与 Firefox (MV2) 同时兼容
 
@@ -31,5 +31,11 @@ Chrome 商店的话，因为注册成为开发者需要付5美元。虽然这个
 
 - `build/chrome/`（Chrome 加载此目录）
 - `build/firefox/`（Firefox 临时加载此目录）
+
+发布打包：
+
+- 通过 GitHub Actions 的 `Release` workflow 手动输入 tag，例如 `v1.2.3`。
+- 仓库中的 manifest 版本保持 `0.0.0` / `DEV0.0.0` 开发占位；发布时 workflow 会临时注入 tag 对应版本。
+- Release 会生成 Chrome zip、Chrome CRX、Firefox zip 与 Firefox XPI。Firefox 未签名 XPI 主要用于临时/开发者模式加载。
 
 更详细的使用说明见 `BUILDING.md`。

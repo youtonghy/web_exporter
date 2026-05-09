@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag, for example v1.2.3"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Test
+        run: node --test
+
+      - name: Package unsigned browser assets
+        run: node scripts/package-release.js --tag "${{ inputs.tag_name }}"
+
+      - name: Package Chrome CRX
+        run: |
+          "${{ steps.setup-chrome.outputs.chrome-path }}" --pack-extension="$PWD/build/chrome"
+          mv "$PWD/build/chrome.crx" "$PWD/dist/release/web-exporter-chrome-${{ inputs.tag_name }}.crx"
+          rm -f "$PWD/build/chrome.pem"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" dist/release/web-exporter-* --clobber
+          else
+            gh release create "$TAG_NAME" dist/release/web-exporter-* --title "$TAG_NAME" --notes "Unsigned developer-mode builds for Chrome and Firefox."
+          fi
