@@ -46,6 +46,8 @@ workflow 会执行：
 - 使用 Chrome 自带的 `--pack-extension` 生成 CRX
 - 创建或更新同名 GitHub Release
 
+GitHub-hosted Linux runner 上的 CRX 打包会为 Chrome 命令添加 `--no-sandbox`，该参数仅用于离线打包本地扩展目录，不用于浏览网页。
+
 发布产物包括：
 
 - `web-exporter-chrome-v1.2.3.zip`

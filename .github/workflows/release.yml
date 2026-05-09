@@ -36,7 +36,7 @@ jobs:
 
       - name: Package Chrome CRX
         run: |
-          "${{ steps.setup-chrome.outputs.chrome-path }}" --pack-extension="$PWD/build/chrome"
+          "${{ steps.setup-chrome.outputs.chrome-path }}" --no-sandbox --pack-extension="$PWD/build/chrome"
           mv "$PWD/build/chrome.crx" "$PWD/dist/release/web-exporter-chrome-${{ inputs.tag_name }}.crx"
           rm -f "$PWD/build/chrome.pem"
 
