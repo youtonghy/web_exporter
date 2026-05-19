@@ -195,14 +195,14 @@ function updatePdfEngineUI() {
     cdpOption.disabled = false;
     nativeOption.disabled = false;
     html2canvasOption.disabled = true;
-    if (pdfEngineSelect.value === "html2canvas" || !pdfEngineSelect.value) {
+    if (pdfEngineSelect.value === "html2canvas" || pdfEngineSelect.value === "native" || !pdfEngineSelect.value) {
       pdfEngineSelect.value = "cdp";
     }
   } else if (isFirefox) {
     cdpOption.disabled = true;
     nativeOption.disabled = false;
     html2canvasOption.disabled = false;
-    if (pdfEngineSelect.value === "cdp" || !pdfEngineSelect.value) {
+    if (pdfEngineSelect.value === "cdp" || pdfEngineSelect.value === "native" || !pdfEngineSelect.value) {
       pdfEngineSelect.value = "html2canvas";
     }
   } else {

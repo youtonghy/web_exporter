@@ -54,6 +54,22 @@ class MockNode {
     return child;
   }
 
+  replaceWith(replacement) {
+    if (!this.parentNode) {
+      return;
+    }
+
+    const index = this.parentNode.childNodes.indexOf(this);
+    if (index === -1) {
+      return;
+    }
+
+    replacement.parentNode = this.parentNode;
+    replacement.ownerDocument = this.ownerDocument;
+    this.parentNode.childNodes[index] = replacement;
+    this.parentNode = null;
+  }
+
   get textContent() {
     return this.childNodes.map((child) => child.textContent || "").join("");
   }
@@ -1163,6 +1179,37 @@ test("expands same-origin iframe height to its document content", async () => {
   assert.equal(iframe.style.height, "640px");
   assert.equal(iframe.style.overflow, "hidden");
   assert.equal(iframe.style.maxHeight, "none");
+});
+
+test("snapshots same-origin iframe content into cloned print roots", async () => {
+  const hooks = loadContentHooks();
+  const ownerDocument = { defaultView: { getComputedStyle(node) { return node.__computedStyle; } } };
+  const sourceRoot = createElement("section", ownerDocument);
+  const cloneRoot = createElement("section", ownerDocument);
+  const iframe = createElement("iframe", ownerDocument);
+  const iframeClone = createElement("iframe", ownerDocument);
+  const iframeDocument = {
+    readyState: "complete",
+    body: createElement("body", ownerDocument),
+    documentElement: createElement("html", ownerDocument)
+  };
+  const card = createElement("article", ownerDocument, { class: "embedded-card" });
+  card.appendChild(text("Embedded page", ownerDocument));
+  iframeDocument.body.appendChild(card);
+  iframeDocument.body.scrollHeight = 640;
+  iframeDocument.body.clientHeight = 640;
+  iframeDocument.body.offsetHeight = 640;
+  iframe.contentDocument = iframeDocument;
+  sourceRoot.appendChild(iframe);
+  cloneRoot.appendChild(iframeClone);
+
+  await hooks.prepareMountedPrintRoot(sourceRoot, cloneRoot, { snapshotIframes: true });
+
+  const snapshot = cloneRoot.childNodes[0];
+  assert.equal(snapshot.tagName.toLowerCase(), "div");
+  assert.equal(snapshot.getAttribute("data-web-exporter-iframe-snapshot"), "true");
+  assert.equal(snapshot.style.height, "640px");
+  assert.equal(snapshot.querySelector(".embedded-card").textContent, "Embedded page");
 });
 
 test("skips inaccessible cross-origin iframes without throwing", async () => {

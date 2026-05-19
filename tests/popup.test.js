@@ -32,3 +32,10 @@ test("popup starts selection through the content API instead of the legacy liste
   assert.match(script, /startSelectionInTab\(tab\.id, payload\)/);
   assert.doesNotMatch(script, /await sendMessage\(tab\.id, payload\)/);
 });
+
+test("popup prefers high fidelity PDF engines per browser", () => {
+  const script = fs.readFileSync(path.join(__dirname, "..", "popup.js"), "utf8");
+
+  assert.match(script, /pdfEngineSelect\.value === "native"[\s\S]*pdfEngineSelect\.value = "cdp";/);
+  assert.match(script, /pdfEngineSelect\.value === "native"[\s\S]*pdfEngineSelect\.value = "html2canvas";/);
+});

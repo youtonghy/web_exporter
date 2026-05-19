@@ -708,6 +708,82 @@
     target.appendChild(img);
   }
 
+  function copyIframePresentation(sourceIframe, snapshotRoot, height) {
+    if (!isElementNode(sourceIframe) || !isElementNode(snapshotRoot)) {
+      return;
+    }
+
+    const cache = createNodeMeasureCache();
+    inlineStyleSubset(sourceIframe, snapshotRoot, cache, CODE_FIDELITY_STYLE_PROPERTIES);
+    snapshotRoot.setAttribute("data-web-exporter-iframe-snapshot", "true");
+    snapshotRoot.style.display = "block";
+    snapshotRoot.style.overflow = "visible";
+    snapshotRoot.style.maxHeight = "none";
+    snapshotRoot.style.border = snapshotRoot.style.border || "0";
+    if (height) {
+      snapshotRoot.style.height = `${Math.ceil(height)}px`;
+      snapshotRoot.style.minHeight = `${Math.ceil(height)}px`;
+    }
+  }
+
+  function getIframeSnapshotSourceRoot(doc) {
+    if (!doc) {
+      return null;
+    }
+    return doc.body || doc.documentElement || null;
+  }
+
+  async function createIframeSnapshot(sourceIframe, targetIframe) {
+    if (!isIframeElement(sourceIframe) || !isElementNode(targetIframe)) {
+      return false;
+    }
+
+    const doc = await waitForIframeLoad(sourceIframe);
+    const sourceRoot = getIframeSnapshotSourceRoot(doc);
+    if (!isElementNode(sourceRoot)) {
+      return false;
+    }
+
+    const targetDocument = targetIframe.ownerDocument && typeof targetIframe.ownerDocument.createElement === "function"
+      ? targetIframe.ownerDocument
+      : document;
+    const snapshotRoot = targetDocument.createElement("div");
+    const snapshotContent = sourceRoot.cloneNode(true);
+    prepareClone(sourceRoot, snapshotContent, {
+      inlineStyles: true,
+      stripStyles: false,
+      syncImages: true,
+      enhancedImages: true
+    });
+    snapshotRoot.appendChild(snapshotContent);
+    await prepareMountedPrintRoot(sourceRoot, snapshotContent);
+    copyIframePresentation(sourceIframe, snapshotRoot, getDocumentContentHeight(doc));
+    targetIframe.replaceWith(snapshotRoot);
+    return true;
+  }
+
+  async function snapshotSameOriginIframes(sourceRoot, cloneRoot) {
+    if (!isElementNode(sourceRoot) || !isElementNode(cloneRoot)) {
+      return [];
+    }
+
+    const sourceIframes = [
+      ...(isIframeElement(sourceRoot) ? [sourceRoot] : []),
+      ...Array.from(sourceRoot.querySelectorAll("iframe"))
+    ];
+    if (!sourceIframes.length) {
+      return [];
+    }
+
+    const cloneNodes = getElementTree(cloneRoot);
+    const cloneIframes = cloneNodes.filter((node) => isIframeElement(node));
+    const results = [];
+    for (let i = 0; i < sourceIframes.length; i += 1) {
+      results.push(await createIframeSnapshot(sourceIframes[i], cloneIframes[i]));
+    }
+    return results;
+  }
+
   function stripPresentationAttributes(node) {
     if (!node || !node.removeAttribute) {
       return;
@@ -3265,10 +3341,14 @@
     return Promise.all(iframes.map((iframe) => expandIframeElementToContent(iframe)));
   }
 
-  async function prepareMountedPrintRoot(sourceRoot, cloneRoot) {
+  async function prepareMountedPrintRoot(sourceRoot, cloneRoot, options = {}) {
     const mountedRoot = cloneRoot || sourceRoot;
     if (!isElementNode(mountedRoot)) {
       return;
+    }
+
+    if (options.snapshotIframes && isElementNode(sourceRoot) && isElementNode(cloneRoot)) {
+      await snapshotSameOriginIframes(sourceRoot, cloneRoot);
     }
 
     if (isElementNode(sourceRoot) && isElementNode(cloneRoot)) {
@@ -3281,7 +3361,9 @@
     const cache = createNodeMeasureCache();
     expandMonacoEditors(mountedRoot, cache);
     expandScrollableElements(mountedRoot, cache);
-    await expandSameOriginIframes(mountedRoot);
+    if (!options.snapshotIframes) {
+      await expandSameOriginIframes(mountedRoot);
+    }
     normalizePrintRootLayout(mountedRoot);
   }
 
@@ -3677,7 +3759,7 @@
     return Promise.all([
       waitForFontsInDocument(doc || document).catch(() => undefined),
       waitForImages(container, getImageLoadTimeout(enhancedImages), enhancedImages)
-    ]).then(() => prepareMountedPrintRoot(sourceRoot || container, container).catch(() => undefined));
+    ]).then(() => prepareMountedPrintRoot(sourceRoot || container, container, { snapshotIframes: Boolean(sourceRoot) }).catch(() => undefined));
   }
 
   async function printInPage(target, keepStyles, enhancedImages, singlePage = true) {
@@ -3880,7 +3962,7 @@
     wrapper.style.cssText = `position:absolute;left:-99999px;top:0;width:${initialPageSize.widthPx}px;z-index:-1;overflow:visible;background:#ffffff;`;
     wrapper.appendChild(clone);
     document.body.appendChild(wrapper);
-    await prepareMountedPrintRoot(target, clone);
+    await prepareMountedPrintRoot(target, clone, { snapshotIframes: true });
     const pageSize = measurePdfPageSize(clone);
     applyPdfPageWidth(wrapper, pageSize);
 
