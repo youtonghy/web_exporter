@@ -174,6 +174,12 @@ function el(tagName, attrs, children = []) {
   return new MockElement(tagName, attrs, children);
 }
 
+function input(attrs, checked = false) {
+  const node = new MockHTMLInputElement("input", attrs);
+  node.checked = checked;
+  return node;
+}
+
 function loadContentHooks(options = {}) {
   const source = fs.readFileSync(path.join(__dirname, "..", "content.js"), "utf8");
   const hostname = options.hostname || "example.com";
@@ -811,6 +817,69 @@ test("exports definition lists as term definition pairs", () => {
   const dl = createDefinitionList();
 
   assert.equal(hooks.elementToMarkdown(dl), "Term\n: Definition");
+});
+
+test("skips hidden markdown noise and formats radio controls distinctly", () => {
+  const hooks = loadContentHooks();
+  const checkedBox = input({ type: "checkbox" }, true);
+  const root = el("div", {}, [
+    el("p", {}, [text("Visible")]),
+    el("p", { style: "display: none;" }, [text("Hidden source")]),
+    el("span", { class: "screenreader-only" }, [text("Move To...")]),
+    el("span", {}, [input({ type: "radio" })]),
+    el("span", {}, [checkedBox])
+  ]);
+
+  assert.equal(hooks.elementToMarkdown(root), "Visible\n\n( )\n\n[x]");
+});
+
+test("exports Canvas quiz questions without hidden source fields or checkbox-style radio options", () => {
+  const hooks = loadContentHooks({ hostname: "canvas.lms.unimelb.edu.au" });
+  const selected = input({ type: "radio", class: "question_input", name: "question_1" }, true);
+  const answer = (control, label) => el("div", { class: "answer" }, [
+    el("label", { class: "answer_row user_content enhanced" }, [
+      el("span", { class: "answer_input" }, [control]),
+      el("div", { class: "answer_label" }, [text(label)])
+    ])
+  ]);
+  const question = el("div", { class: "display_question question multiple_choice_question" }, [
+    el("div", { class: "move" }, [
+      el("a", { class: "draggable-handle", role: "button" }, [
+        el("span", { class: "screenreader-only" }, [text("Move To...")])
+      ])
+    ]),
+    el("a", { class: "flag_question", role: "checkbox" }, [
+      el("span", { class: "screenreader-only" }, [text("Flag question: Question 1")])
+    ]),
+    el("div", { class: "header" }, [
+      el("span", { class: "name question_name", role: "heading" }, [text("Question 1")]),
+      el("span", { class: "question_points_holder" }, [
+        el("span", { class: "points question_points" }, [text("2")]),
+        text(" pts")
+      ])
+    ]),
+    el("div", { style: "display: none;" }, [
+      el("span", { class: "question_type" }, [text("multiple_choice_question")])
+    ]),
+    el("div", { class: "text" }, [
+      el("div", { class: "original_question_text", style: "display: none;" }, [
+        el("textarea", { name: "question_text" }, [text("<p>Raw HTML source</p>")])
+      ]),
+      el("div", { class: "question_text user_content enhanced" }, [text("Which option is correct?")]),
+      el("div", { class: "answers" }, [
+        el("fieldset", {}, [
+          el("legend", { class: "screenreader-only" }, [text("Group of answer choices")]),
+          answer(input({ type: "radio", class: "question_input", name: "question_1" }), "First option"),
+          answer(selected, "Second option")
+        ])
+      ])
+    ])
+  ]);
+
+  assert.equal(
+    hooks.elementToMarkdown(question),
+    "## Question 1 (2 pts)\n\nWhich option is correct?\n\nGroup of answer choices\n\n- ( ) First option\n- (x) Second option"
+  );
 });
 
 test("exports details blocks with summary text", () => {

@@ -905,13 +905,26 @@
       .join("");
   }
 
+  function isInputChecked(node) {
+    if (!(node instanceof HTMLInputElement)) {
+      return false;
+    }
+    if (typeof node.checked === "boolean") {
+      return node.checked;
+    }
+    return hasAttribute(node, "checked");
+  }
+
   function formatInputValue(node) {
     if (!(node instanceof HTMLInputElement)) {
       return "";
     }
     const type = (node.getAttribute("type") || "text").toLowerCase();
-    if (type === "checkbox" || type === "radio") {
-      return node.checked ? "[x]" : "[ ]";
+    if (type === "checkbox") {
+      return isInputChecked(node) ? "[x]" : "[ ]";
+    }
+    if (type === "radio") {
+      return isInputChecked(node) ? "(x)" : "( )";
     }
     return escapeMarkdownText(node.value || "");
   }
@@ -925,8 +938,187 @@
     return escapeMarkdownText(normalizeWhitespace(text || ""));
   }
 
+  function isCanvasQuestionElement(node) {
+    return node instanceof Element && hasClass(node, "display_question") && hasClass(node, "question");
+  }
+
+  function getCanvasQuestionTitle(node, context) {
+    const nameNode = node.querySelector(".question_name");
+    const title = nameNode ? convertInlineChildren(nameNode, context).trim() : "";
+    return title || "";
+  }
+
+  function getCanvasQuestionPoints(node, context) {
+    const pointsNode = node.querySelector(".question_points_holder");
+    const points = pointsNode ? convertInlineChildren(pointsNode, context).trim() : "";
+    return points || "";
+  }
+
+  function formatChoiceMarker(input) {
+    if (!(input instanceof HTMLInputElement)) {
+      return "-";
+    }
+    const type = (input.getAttribute("type") || "text").toLowerCase();
+    if (type === "checkbox") {
+      return isInputChecked(input) ? "[x]" : "[ ]";
+    }
+    if (type === "radio") {
+      return isInputChecked(input) ? "(x)" : "( )";
+    }
+    return "-";
+  }
+
+  function formatCanvasAnswerChoice(answerNode, context) {
+    if (!(answerNode instanceof Element) || isMarkdownHiddenElement(answerNode, context)) {
+      return "";
+    }
+    const input = answerNode.querySelector("input");
+    const labelNode = answerNode.querySelector(".answer_label") || answerNode.querySelector("label") || answerNode;
+    const content = convertNode(labelNode, context).trim();
+    if (!content) {
+      return "";
+    }
+
+    const marker = formatChoiceMarker(input);
+    const lines = content.split("\n");
+    const firstLine = lines.shift() || "";
+    const rest = lines.map((line) => (line ? `  ${line}` : "")).join("\n");
+    return [`- ${marker} ${firstLine}`.trimEnd(), rest].filter(Boolean).join("\n");
+  }
+
+  function convertCanvasAnswers(node, context) {
+    const answersRoot = node.querySelector(".answers");
+    if (!(answersRoot instanceof Element) || isMarkdownHiddenElement(answersRoot, context)) {
+      return "";
+    }
+
+    const answerNodes = Array.from(answersRoot.querySelectorAll(".answer"));
+    if (!answerNodes.length) {
+      return convertBlockChildren(answersRoot, context);
+    }
+
+    const blocks = [];
+    const legend = answersRoot.querySelector("legend");
+    const legendText = legend ? escapeMarkdownText(normalizeWhitespace(legend.textContent || "").trim()) : "";
+    if (legendText) {
+      blocks.push(legendText);
+    }
+
+    const choices = answerNodes
+      .map((answer) => formatCanvasAnswerChoice(answer, context))
+      .filter(Boolean)
+      .join("\n");
+    if (choices) {
+      blocks.push(choices);
+    }
+
+    return blocks.join("\n\n");
+  }
+
+  function convertCanvasQuestion(node, context) {
+    const blocks = [];
+    const title = getCanvasQuestionTitle(node, context);
+    const points = getCanvasQuestionPoints(node, context);
+    if (title) {
+      blocks.push(points ? `## ${title} (${points})` : `## ${title}`);
+    }
+
+    const questionTextNode = node.querySelector(".question_text");
+    const questionText = questionTextNode ? convertNode(questionTextNode, context).trim() : "";
+    if (questionText) {
+      blocks.push(questionText);
+    }
+
+    const answers = convertCanvasAnswers(node, context);
+    if (answers) {
+      blocks.push(answers);
+    }
+
+    return blocks.join("\n\n");
+  }
+
   function hasClass(node, name) {
     return node instanceof Element && node.classList && node.classList.contains(name);
+  }
+
+  function hasAttribute(node, name) {
+    return node instanceof Element && node.getAttribute(name) !== null;
+  }
+
+  function getClassTokens(node) {
+    return getAttributeValue(node, "class").split(/\s+/).filter(Boolean);
+  }
+
+  function hasAnyClassToken(node, names) {
+    const candidates = new Set(names);
+    return getClassTokens(node).some((token) => candidates.has(token.toLowerCase()));
+  }
+
+  function getInlineStyleProperty(node, property) {
+    const style = getAttributeValue(node, "style");
+    if (!style) {
+      return "";
+    }
+    const pattern = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, "i");
+    const match = style.match(pattern);
+    return match ? match[1].replace(/!important/gi, "").trim().toLowerCase() : "";
+  }
+
+  function getMarkdownComputedStyle(node, context) {
+    if (!isElementNode(node) || typeof window === "undefined" || typeof window.getComputedStyle !== "function") {
+      return null;
+    }
+    try {
+      return getCachedComputedStyle(node, context && context.cache);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function isMarkdownHiddenElement(node, context) {
+    if (!(node instanceof Element)) {
+      return false;
+    }
+
+    const tag = node.tagName.toLowerCase();
+    if (tag === "input" && (node.getAttribute("type") || "").toLowerCase() === "hidden") {
+      return true;
+    }
+    if (hasAttribute(node, "hidden")) {
+      return true;
+    }
+    if (hasAnyClassToken(node, [
+      "screenreader-only",
+      "sr-only",
+      "visually-hidden",
+      "visuallyhidden",
+      "visually_hidden",
+      "offscreen",
+      "a11y-only"
+    ])) {
+      return true;
+    }
+
+    const inlineDisplay = getInlineStyleProperty(node, "display");
+    if (inlineDisplay === "none") {
+      return true;
+    }
+    const inlineVisibility = getInlineStyleProperty(node, "visibility");
+    if (inlineVisibility === "hidden" || inlineVisibility === "collapse") {
+      return true;
+    }
+
+    const computed = getMarkdownComputedStyle(node, context);
+    if (computed) {
+      if (computed.display === "none") {
+        return true;
+      }
+      if (computed.visibility === "hidden" || computed.visibility === "collapse") {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   function getCurrentHostname() {
@@ -1743,6 +1935,9 @@
     if (node.nodeType !== Node.ELEMENT_NODE) {
       return "";
     }
+    if (isMarkdownHiddenElement(node, context)) {
+      return "";
+    }
     const math = convertMathNode(node);
     if (math) {
       return math;
@@ -2017,6 +2212,12 @@
     if (node.nodeType !== Node.ELEMENT_NODE) {
       return "";
     }
+    if (isMarkdownHiddenElement(node, context)) {
+      return "";
+    }
+    if (isCanvasQuestionElement(node)) {
+      return convertCanvasQuestion(node, context);
+    }
     if (isEdStemElement(node, ["ed-print-hidden"])) {
       return "";
     }
@@ -2088,7 +2289,7 @@
   }
 
   function elementToMarkdown(root) {
-    const content = convertNode(root, { listDepth: 0 });
+    const content = convertNode(root, { listDepth: 0, cache: createNodeMeasureCache() });
     return normalizeMarkdown(content);
   }
 
