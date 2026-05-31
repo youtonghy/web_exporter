@@ -68,7 +68,11 @@ async function patchManifest(target, versionInfo) {
   const manifestPath = path.join(buildRoot, target, "manifest.json");
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
   manifest.version = versionInfo.version;
-  manifest.version_name = versionInfo.versionName;
+  if (target === "chrome") {
+    manifest.version_name = versionInfo.versionName;
+  } else {
+    delete manifest.version_name;
+  }
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
