@@ -954,21 +954,33 @@
     return points || "";
   }
 
-  function formatChoiceMarker(input) {
+  function formatChoiceMarker(input, checkedOverride) {
     if (!(input instanceof HTMLInputElement)) {
       return "-";
     }
     const type = (input.getAttribute("type") || "text").toLowerCase();
+    const checked = typeof checkedOverride === "boolean" ? checkedOverride : isInputChecked(input);
     if (type === "checkbox") {
-      return isInputChecked(input) ? "[x]" : "[ ]";
+      return checked ? "[x]" : "[ ]";
     }
     if (type === "radio") {
-      return isInputChecked(input) ? "(x)" : "( )";
+      return checked ? "(x)" : "( )";
     }
     return "-";
   }
 
-  function formatCanvasAnswerChoice(answerNode, context) {
+  function isCanvasCorrectAnswerChoice(answerNode) {
+    if (!(answerNode instanceof Element)) {
+      return false;
+    }
+    return hasClass(answerNode, "correct_answer") || Boolean(answerNode.querySelector('[aria-label="Correct Answer"]'));
+  }
+
+  function hasCanvasCorrectAnswerChoices(answers) {
+    return answers.some((answer) => isCanvasCorrectAnswerChoice(answer));
+  }
+
+  function formatCanvasAnswerChoice(answerNode, context, options = {}) {
     if (!(answerNode instanceof Element) || isMarkdownHiddenElement(answerNode, context)) {
       return "";
     }
@@ -979,7 +991,10 @@
       return "";
     }
 
-    const marker = formatChoiceMarker(input);
+    const marker = formatChoiceMarker(
+      input,
+      options.useCorrectAnswerMarkers ? isCanvasCorrectAnswerChoice(answerNode) : undefined
+    );
     const lines = content.split("\n");
     const firstLine = lines.shift() || "";
     const rest = lines.map((line) => (line ? `  ${line}` : "")).join("\n");
@@ -1004,8 +1019,9 @@
       blocks.push(legendText);
     }
 
+    const useCorrectAnswerMarkers = hasCanvasCorrectAnswerChoices(answerNodes);
     const choices = answerNodes
-      .map((answer) => formatCanvasAnswerChoice(answer, context))
+      .map((answer) => formatCanvasAnswerChoice(answer, context, { useCorrectAnswerMarkers }))
       .filter(Boolean)
       .join("\n");
     if (choices) {

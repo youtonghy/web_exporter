@@ -882,6 +882,44 @@ test("exports Canvas quiz questions without hidden source fields or checkbox-sty
   );
 });
 
+test("exports Canvas result-page correct answers even when radios are not checked", () => {
+  const hooks = loadContentHooks({ hostname: "canvas.lms.unimelb.edu.au" });
+  const selectedWrong = input({ type: "radio", class: "question_input", name: "question_1" }, true);
+  const correct = input({ type: "radio", class: "question_input", name: "question_1" });
+  const answer = (className, control, label) => el("div", { class: className }, [
+    el("div", { class: "select_answer answer_type" }, [
+      control,
+      el("label", {}, [
+        el("div", { class: "answer_text" }, [text(label)])
+      ])
+    ])
+  ]);
+  const question = el("div", { class: "display_question question multiple_choice_question incorrect unanswered bordered" }, [
+    el("div", { class: "header" }, [
+      el("span", { class: "name question_name", role: "heading" }, [text("Question 1")]),
+      el("span", { class: "question_points_holder" }, [
+        text("0 "),
+        el("span", { class: "points question_points" }, [text("/ 1")]),
+        text(" pts")
+      ])
+    ]),
+    el("div", { class: "text" }, [
+      el("div", { class: "question_text user_content enhanced" }, [
+        el("p", {}, [text("What is classification mainly used for?")])
+      ]),
+      el("div", { class: "answers" }, [
+        answer("answer answer_for_", selectedWrong, "Drawing charts"),
+        answer("answer answer_for_ correct_answer", correct, "Putting data elements into the right class or group")
+      ])
+    ])
+  ]);
+
+  assert.equal(
+    hooks.elementToMarkdown(question),
+    "## Question 1 (0 / 1 pts)\n\nWhat is classification mainly used for?\n\n- ( ) Drawing charts\n- (x) Putting data elements into the right class or group"
+  );
+});
+
 test("exports details blocks with summary text", () => {
   const hooks = loadContentHooks();
   const details = createDetailsBlock();
